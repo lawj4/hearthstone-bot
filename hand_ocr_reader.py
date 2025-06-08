@@ -419,8 +419,9 @@ def main():
     print("Starting OCR analysis on detected white crystals...")
     
     # Check if test_hand.png exists
-    if not os.path.exists('test_hand.png'):
-        print("Error: test_hand.png not found!")
+    file_name = "images/preprocess_hand.png"
+    if not os.path.exists(file_name):
+        print(f"Error: {file_name} not found!")
         print("Please run hearthstone_regions.py first to generate this file.")
         return
     

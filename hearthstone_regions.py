@@ -41,13 +41,13 @@ class HearthstoneRegions:
         
         return mana_region
     
-    def get_board_region(self, image, color=True):
+    def get_ally_board_region(self, image, color=True):
         """Extract the game board area (center)"""
         height, width = image.shape[:2]
         # Board is roughly middle 40% vertically, center 60% horizontally
-        board_region = image[int(height * 0.3):int(height * 0.7), 
-                           int(width * 0.2):int(width * 0.8)]
-        return board_region
+        ally_board_region = image[int(height * 0.59):int(height * 0.63), 
+                           int(width * 0.15):int(width * 0.85)]
+        return ally_board_region
     
     def get_enemy_hand_region(self, image, color=True):
         """Extract enemy hand area (top of screen)"""
@@ -122,21 +122,25 @@ class HearthstoneRegions:
         regions = {
             'hand': self.get_hand_region(image, color=hand_in_color),
             'mana_crystals': self.get_mana_crystals_region(image, color=False),  # Keep mana in grayscale for OCR
-            'board': self.get_board_region(image, color=True),
+            'ally_board': self.get_ally_board_region(image, color=True),
             'enemy_hand': self.get_enemy_hand_region(image, color=True),
             'hero_portraits': self.get_hero_portraits_region(image, color=True)
         }
         
         # Save original
-        cv2.imwrite(f'{prefix}_full_screenshot.png', image)
-        print(f"Saved: {prefix}_full_screenshot.png")
-        
+        os.makedirs("images", exist_ok=True)
+
+        # Save full screenshot
+        full_path = os.path.join("images", f"{prefix}_full_screenshot.png")
+        cv2.imwrite(full_path, image)
+        print(f"Saved: {full_path}")
+
         # Save each region
         for name, region in regions.items():
-            filename = f'{prefix}_{name}.png'
-            cv2.imwrite(filename, region)
+            region_path = os.path.join("images", f"{prefix}_{name}.png")
+            cv2.imwrite(region_path, region)
             color_info = "color" if len(region.shape) == 3 else "grayscale"
-            print(f"Saved: {filename} ({color_info})")
+            print(f"Saved: {region_path} ({color_info})")
         
         return regions
 
@@ -154,7 +158,7 @@ if __name__ == "__main__":
     regions = HearthstoneRegions()
     
     # Save all regions as PNG files - hand in color, mana crystals in grayscale
-    regions.save_regions_as_images(image, 'test', hand_in_color=True)
+    regions.save_regions_as_images(image, 'preprocess', hand_in_color=True)
     
     # Test hand card detection with color image
     hand_region = regions.get_hand_region(image, color=True)  # Get color hand

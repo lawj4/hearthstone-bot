@@ -3,17 +3,19 @@ import numpy as np
 import pytesseract
 import os
 import re
+import utils
 
 class ManaCrystalReader:
-    """Class specifically for reading mana crystals in #/# format from test_mana_crystals.png"""
+    """Class specifically for reading mana crystals in #/# format from preprocess_mana_crystals.png"""
     
-    def __init__(self):
+    def __init__(self, save_debug_images=False):
         # OCR configuration for numbers and slash
         self.ocr_config = '--psm 8 -c tessedit_char_whitelist=0123456789/'
+        self.save_debug_images = save_debug_images
     
     def load_mana_crystals_image(self):
         """Load the mana crystals region from saved screenshot"""
-        filename = 'test_mana_crystals.png'
+        filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
         if not os.path.exists(filename):
             raise FileNotFoundError(f"Mana crystals file not found: {filename}")
         
@@ -72,17 +74,18 @@ class ManaCrystalReader:
             return None, None, text
             
         except Exception as e:
-            print(f"OCR Error: {e}")
+            if self.save_debug_images:
+                print(f"OCR Error: {e}")
             return None, None, ""
     
     def analyze_mana_crystals(self):
-        """Analyze mana crystals from test_mana_crystals.png"""
-        print("Loading mana crystals from: test_mana_crystals.png")
-        
-        if not os.path.exists('test_mana_crystals.png'):
-            print("Error: test_mana_crystals.png not found!")
-            print("Please run hearthstone_regions.py first to generate the region files.")
-            return None
+        """Analyze mana crystals from preprocess_mana_crystals.png"""
+        filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
+        if not os.path.exists(filename):
+            if self.save_debug_images:
+                print("Error: preprocess_mana_crystals.png not found!")
+                print("Please run hearthstone_regions.py first to generate the region files.")
+            return None, None
         
         # Load the mana crystals image
         mana_image = self.load_mana_crystals_image()
@@ -101,7 +104,9 @@ class ManaCrystalReader:
     
     def save_analysis_results(self, result, mana_image, prefix='mana_crystals_analysis'):
         """Save the mana crystal analysis results as images"""
-        
+        if not self.save_debug_images:
+            return
+            
         # Create visualization
         result_image = mana_image.copy()
         if len(result_image.shape) == 2:  # grayscale
@@ -158,16 +163,16 @@ class ManaCrystalReader:
         return methods
 
 def main():
-    """Main function to analyze mana crystals from test_mana_crystals.png"""
-    reader = ManaCrystalReader()
+    """Main function to analyze mana crystals from preprocess_mana_crystals.png"""
+    reader = ManaCrystalReader(save_debug_images=False)
     
-    print("Hearthstone Mana Crystal Reader (#/# format)")
-    print("=" * 45)
+    print("Hearthstone Mana Crystal Reader")
+    filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
     
     # Check if test file exists
-    if not os.path.exists('test_mana_crystals.png'):
-        print("Missing file: test_mana_crystals.png")
-        print("\nPlease run hearthstone_regions.py first to generate this file.")
+    if not os.path.exists(filename):
+        print(f"Missing file: {filename}")
+        print("Please run hearthstone_regions.py first to generate this file.")
         return
     
     # Analyze mana crystals
@@ -177,27 +182,14 @@ def main():
         return
     
     # Print results
-    print(f"\nMana Crystal Detection:")
-    print("-" * 30)
     if result['success']:
-        print(f"✓ Current Mana: {result['current_mana']}")
-        print(f"✓ Maximum Mana: {result['max_mana']}")
-        print(f"✓ Format: {result['current_mana']}/{result['max_mana']}")
-        
-        # Calculate additional info
-        available_mana = result['current_mana']
-        mana_crystals_used = result['max_mana'] - result['current_mana']
-        
-        print(f"\nMana Status:")
-        print(f"  Available: {available_mana}")
-        print(f"  Used this turn: {mana_crystals_used}")
-        print(f"  Total crystals: {result['max_mana']}")
+        print(f"Current Mana: {result['current_mana']}/{result['max_mana']}")
+        print(f"Available: {result['current_mana']}, Used: {result['max_mana'] - result['current_mana']}")
     else:
-        print(f"✗ Detection failed")
-        print(f"✗ Raw OCR text: '{result['raw_text']}'")
+        print(f"Detection failed - Raw text: '{result['raw_text']}'")
         
         # Try alternative preprocessing methods
-        print(f"\nTrying alternative preprocessing methods...")
+        print("Trying alternative methods...")
         alt_methods = reader.try_alternative_preprocessing(mana_image)
         
         for method_name, processed_img in alt_methods:
@@ -215,25 +207,19 @@ def main():
                     current = int(match.group(1))
                     maximum = int(match.group(2))
                     if 0 <= current <= 10 and 0 <= maximum <= 10:
-                        print(f"  ✓ {method_name}: {current}/{maximum}")
+                        print(f"✓ {method_name}: {current}/{maximum}")
                         # Save the successful method
                         cv2.imwrite(f'mana_crystals_analysis_{method_name}.png', scaled)
                         continue
                 
-                print(f"  ✗ {method_name}: '{alt_text}'")
+                print(f"✗ {method_name}: '{alt_text}'")
                 
             except Exception as e:
-                print(f"  ✗ {method_name}: Error - {e}")
+                print(f"✗ {method_name}: Error - {e}")
     
-    # Save analysis results
-    print(f"\nSaving analysis results...")
-    print("-" * 30)
-    reader.save_analysis_results(result, mana_image, 'mana_crystals_analysis')
-    
-    print(f"\nAnalysis complete! Check the generated images:")
-    print("  - mana_crystals_analysis_overview.png: Result visualization")
-    print("  - mana_crystals_analysis_original.png: Original region")
-    print("  - mana_crystals_analysis_processed.png: Processed for OCR")
+    # Save analysis results (only if debug images enabled)
+    if reader.save_debug_images:
+        reader.save_analysis_results(result, mana_image, 'mana_crystals_analysis')
 
 if __name__ == "__main__":
     main()

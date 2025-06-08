@@ -10,10 +10,11 @@ class HandReader:
     
     def load_hand_image(self):
         """Load test_hand.png file"""
-        if not os.path.exists('test_hand.png'):
+        file_name = "images/preprocess_hand.png"
+        if not os.path.exists(file_name):
             raise FileNotFoundError("test_hand.png not found! Please run hearthstone_regions.py first.")
         
-        hand_image = cv2.imread('test_hand.png', cv2.IMREAD_COLOR)
+        hand_image = cv2.imread(file_name, cv2.IMREAD_COLOR)
         if hand_image is None:
             raise ValueError("Could not load test_hand.png")
         
@@ -119,8 +120,9 @@ def main():
     print("=" * 50)
     
     # Check if test_hand.png exists
-    if not os.path.exists('test_hand.png'):
-        print("Error: test_hand.png not found!")
+    file_name = "images/preprocess_hand.png"
+    if not os.path.exists(file_name):
+        print(f"Error: {file_name} not found!")
         print("Please run hearthstone_regions.py first to generate this file.")
         return
     
