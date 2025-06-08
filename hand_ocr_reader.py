@@ -6,11 +6,10 @@ import re
 from hand_white_mask import HandReader
 
 class HandOCRReader:
-    """Class to apply OCR to all detected white objects from hand_white_mask.py"""
+    """Class to apply OCR to all detected white objects from hand_white_mask.py."""
     
     def __init__(self):
         self.hand_reader = HandReader()
-        
         # OCR PARAMETERS - Edit these values to tune performance
         self.ocr_params = {
             'white_threshold': 240,      # Threshold for white text (200-255)
@@ -145,7 +144,7 @@ class HandOCRReader:
         all_results = []  # Store all valid results with confidence scores
         high_confidence_threshold = self.ocr_params['high_confidence_early_stop']
         low_confidence_skip_threshold = self.ocr_params['low_confidence_skip_angle']
-        
+        #try 
         # Try different rotation angles
         for angle in self.ocr_params['rotation_angles']:
             print(f"    Trying rotation: {angle}°")
