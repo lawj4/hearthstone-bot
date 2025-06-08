@@ -17,7 +17,7 @@ class HearthstoneRegions:
         height, width = image.shape[:2]
         # Hand is typically bottom 20% of screen
         
-        hand_region = image[int(height * 0.85):height, int(width * 0.275):int(width * 0.675)]
+        hand_region = image[int(height * 0.85):height, int(width * 0.27):int(width * 0.65)]
         
         # Convert to grayscale if requested and image is color
         if not color and len(image.shape) == 3:
