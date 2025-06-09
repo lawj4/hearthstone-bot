@@ -29,16 +29,16 @@ class HandOCRReader:
         self.hand_reader = HandReader()
         # OCR PARAMETERS - Edit these values to tune performance
         self.ocr_params = {
-            'white_threshold': 240,      # Threshold for white text (200-255)
-            'scale_factor': 20,          # Upscaling factor (increased from 8 to 20)
-            'gaussian_blur': (3, 3),     # Gaussian blur kernel size (1,1) to (7,7) - use odd numbers
-            'gaussian_sigma': 1.0,       # Gaussian blur sigma (0.5-2.0)
-            'morph_kernel_size': 2,      # Morphological operations kernel size (1-5)
-            'padding': 15,               # Padding around crystals (10-25)
+            'white_threshold': 250,      # Threshold for white text (200-255)
+            'scale_factor': 10,          # Upscaling factor (increased from 8 to 20)
+            'gaussian_blur': (7, 7),     # Gaussian blur kernel size (1,1) to (7,7) - use odd numbers
+            'gaussian_sigma': 0.5,       # Gaussian blur sigma (0.5-2.0)
+            'morph_kernel_size': 1,      # Morphological operations kernel size (1-5)
+            'padding': 5,               # Padding around crystals (10-25)
             'rotation_angles': [0, -5, 5, -10, 10, -15, 15],  # Try 0° first, then small angles
             
             # NEW CONFIDENCE PARAMETERS
-            'high_confidence_early_stop': 90,  # Stop trying other methods if confidence >= this value
+            'high_confidence_early_stop': 85,  # Stop trying other methods if confidence >= this value
             'low_confidence_skip_angle': 20,   # Skip remaining PSMs for angles with max confidence below this value
         }
         

@@ -53,12 +53,17 @@ class HearthstoneMonitor:
             return []
     
     def analyze_ally_board(self):
-        """Analyze ally board and return positions"""
+        """Analyze ally board and return the actual numbers (attack/health values)"""
         try:
-            combined_mask, crystal_boxes = self.ally_reader.analyze_color_mask()
-            return len(crystal_boxes) if crystal_boxes else 0
+            # Use the new analyze_all_crystals method that returns OCR results
+            ally_results = self.ally_reader.analyze_all_crystals()
+            if ally_results:
+                successful_reads = [r for r in ally_results if r['success']]
+                ally_numbers = [r['number'] for r in successful_reads]
+                return ally_numbers
+            return []
         except Exception:
-            return 0
+            return []
     
     def analyze_mana_crystals(self):
         """Analyze current mana crystals"""
@@ -132,9 +137,9 @@ class HearthstoneMonitor:
         
         # Analyze each component
         hand_costs = self.analyze_hand_cards()
-        ally_count = self.analyze_ally_board()
+        ally_numbers = self.analyze_ally_board()  # Now returns actual numbers instead of count
         
-        # Analyze mana crystals - THIS WAS MISSING!
+        # Analyze mana crystals
         current_mana, max_mana = self.analyze_mana_crystals()
         
         # Analyze health values
@@ -159,8 +164,12 @@ class HearthstoneMonitor:
         else:
             parts.append("Hand:[]")
         
-        # Ally board
-        parts.append(f"Allies:{ally_count}")
+        # Ally board - NOW SHOWS ACTUAL NUMBERS
+        if ally_numbers:
+            ally_str = ','.join(map(str, ally_numbers))
+            parts.append(f"Allies:[{ally_str}]")
+        else:
+            parts.append("Allies:[]")
         
         # Health values
         if ally_health is not None:
@@ -204,9 +213,10 @@ def main():
     
     monitor = HearthstoneMonitor(buffer_seconds)
     
-    # Print header
+    # Print header - UPDATED to reflect that Allies now shows numbers
     print("Time | Mana | Hand | Allies | MyHP | EnemyHP")
-    print("-" * 50)
+    print("Note: Allies now shows attack/health numbers instead of count")
+    print("-" * 60)
     
     # Run monitoring
     monitor.run_continuous_monitoring()
