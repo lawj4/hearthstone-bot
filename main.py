@@ -13,18 +13,20 @@ from hearthstone_regions import HearthstoneRegions
 from hand_ocr_reader import HandOCRReader
 from ally_ocr_reader import AllyBoardReader
 from mana_reader import ManaCrystalReader
+from hero_health_ocr_reader import HeroHealthOCRReader
 import utils
 
 class HearthstoneMonitor:
     """Main monitoring class that takes screenshots and analyzes game state"""
     
-    def __init__(self, buffer_seconds=5):
+    def __init__(self, buffer_seconds=utils.BUFFER):
         self.buffer_seconds = buffer_seconds
         self.capturer = ScreenCapture()
         self.regions = HearthstoneRegions()
         self.hand_reader = HandOCRReader()
         self.ally_reader = AllyBoardReader()
         self.mana_reader = ManaCrystalReader(save_debug_images=False)
+        self.health_reader = HeroHealthOCRReader()
         
         # Set debug images to False for continuous monitoring
         utils.DEBUG_IMAGES = False
@@ -97,18 +99,25 @@ class HearthstoneMonitor:
             return None
     
     def analyze_health_values(self):
-        """Analyze ally and enemy health"""
+        """Analyze ally and enemy health using hero health OCR reader"""
         try:
-            # Load the full screenshot
-            screenshot = self.capturer.capture_color()
+            # Use the dedicated health OCR reader
+            results = self.health_reader.analyze_both_health_regions()
             
-            # Extract health regions
-            ally_health_region = self.regions.get_ally_health_region(screenshot, color=False)
-            enemy_health_region = self.regions.get_enemy_health_region(screenshot, color=False)
+            ally_health = None
+            enemy_health = None
             
-            # Read health values
-            ally_health = self.read_health_ocr(ally_health_region)
-            enemy_health = self.read_health_ocr(enemy_health_region)
+            # Extract enemy health
+            if results.get('enemy'):
+                successful_enemy = [r for r in results['enemy'] if r['success']]
+                if successful_enemy:
+                    enemy_health = max(successful_enemy, key=lambda x: int(x['method'].split('conf')[1]) if 'conf' in x['method'] else 0)['number']
+            
+            # Extract ally health
+            if results.get('ally'):
+                successful_ally = [r for r in results['ally'] if r['success']]
+                if successful_ally:
+                    ally_health = max(successful_ally, key=lambda x: int(x['method'].split('conf')[1]) if 'conf' in x['method'] else 0)['number']
             
             return ally_health, enemy_health
         except Exception:
@@ -124,7 +133,11 @@ class HearthstoneMonitor:
         # Analyze each component
         hand_costs = self.analyze_hand_cards()
         ally_count = self.analyze_ally_board()
+        
+        # Analyze mana crystals - THIS WAS MISSING!
         current_mana, max_mana = self.analyze_mana_crystals()
+        
+        # Analyze health values
         ally_health, enemy_health = self.analyze_health_values()
         
         # Format output

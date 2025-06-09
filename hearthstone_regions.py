@@ -1,12 +1,31 @@
 import cv2
 import numpy as np
+import logging
+import os
 
 class HearthstoneRegions:
     """Class to extract specific regions from Hearthstone screenshots"""
     
     def __init__(self, screen_width=None, screen_height=None):
+        # Set up logging
+        self.logger = logging.getLogger('HearthstoneRegions')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Create file handler if it doesn't exist
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler('logs/hearthstone_debug.log')
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        
         self.screen_width = screen_width
         self.screen_height = screen_height
+        
+        self.logger.info("HearthstoneRegions initialized")
     
     def get_hand_region(self, image, color=True):
         """Extract the hand area from bottom of screen
@@ -18,6 +37,8 @@ class HearthstoneRegions:
         # Hand is typically bottom 20% of screen
         
         hand_region = image[int(height * 0.85):height, int(width * 0.27):int(width * 0.65)]
+        
+        self.logger.debug(f"Extracted hand region: {hand_region.shape}, color={color}")
         
         # Convert to grayscale if requested and image is color
         if not color and len(image.shape) == 3:
@@ -35,6 +56,8 @@ class HearthstoneRegions:
         # Mana crystals are bottom-left corner
         mana_region = image[int(height * 0.92):int(height * 0.94), int(width * 0.65):int(width * 0.7)]
         
+        self.logger.debug(f"Extracted mana crystals region: {mana_region.shape}, color={color}")
+        
         # Convert to grayscale if requested and image is color
         if not color and len(image.shape) == 3:
             mana_region = cv2.cvtColor(mana_region, cv2.COLOR_BGR2GRAY)
@@ -47,6 +70,8 @@ class HearthstoneRegions:
         # Ally board is roughly lower middle section
         ally_board_region = image[int(height * 0.59):int(height * 0.63), 
                            int(width * 0.15):int(width * 0.85)]
+        
+        self.logger.debug(f"Extracted ally board region: {ally_board_region.shape}, color={color}")
         return ally_board_region
     
     def get_enemy_board_region(self, image, color=True):
@@ -55,6 +80,8 @@ class HearthstoneRegions:
         # Enemy board is roughly upper middle section, above ally board
         enemy_board_region = image[int(height * 0.37):int(height * 0.41), 
                             int(width * 0.15):int(width * 0.85)]
+        
+        self.logger.debug(f"Extracted enemy board region: {enemy_board_region.shape}, color={color}")
         return enemy_board_region
     
     def get_enemy_health_region(self, image, color=True):
@@ -62,6 +89,8 @@ class HearthstoneRegions:
         height, width = image.shape[:2]
         # Enemy health is top center of screen
         enemy_health = image[int(height * 0.255):int(height * 0.295), int(width * 0.53):int(width * 0.555)]
+        
+        self.logger.debug(f"Extracted enemy health region: {enemy_health.shape}, color={color}")
         return enemy_health
     
     def get_ally_health_region(self, image, color=True):
@@ -69,6 +98,8 @@ class HearthstoneRegions:
         height, width = image.shape[:2]
         # Ally health is bottom center, similar positioning to enemy but lower
         ally_health = image[int(height * 0.82):int(height * 0.86), int(width * 0.53):int(width * 0.555)]
+        
+        self.logger.debug(f"Extracted ally health region: {ally_health.shape}, color={color}")
         return ally_health
     
     def find_card_regions_in_hand(self, hand_region):
@@ -99,6 +130,8 @@ class HearthstoneRegions:
         
         # Sort by x-position (left to right)
         card_boxes.sort(key=lambda box: box[0])
+        
+        self.logger.debug(f"Found {len(card_boxes)} card regions in hand")
         return card_boxes
     
     def extract_card_subregions(self, card_region):
@@ -114,6 +147,7 @@ class HearthstoneRegions:
             'name_area': card_region[int(height * 0.7):int(height * 0.85), :]
         }
         
+        self.logger.debug(f"Extracted {len(regions)} card subregions")
         return regions
     
     def save_regions_as_images(self, image, prefix='region', hand_in_color=True):
@@ -123,7 +157,7 @@ class HearthstoneRegions:
             prefix: Filename prefix
             hand_in_color: If True, saves hand region in color; if False, in grayscale
         """
-        import os
+        self.logger.info(f"Saving regions with prefix '{prefix}'")
         
         # Get regions with appropriate color settings
         regions = {
@@ -141,22 +175,27 @@ class HearthstoneRegions:
         # Save full screenshot
         full_path = os.path.join("images", f"{prefix}_full_screenshot.png")
         cv2.imwrite(full_path, image)
-        print(f"Saved: {full_path}")
+        self.logger.debug(f"Saved: {full_path}")
 
         # Save each region
         for name, region in regions.items():
             region_path = os.path.join("images", f"{prefix}_{name}.png")
             cv2.imwrite(region_path, region)
             color_info = "color" if len(region.shape) == 3 else "grayscale"
-            print(f"Saved: {region_path} ({color_info})")
+            self.logger.debug(f"Saved: {region_path} ({color_info})")
         
+        self.logger.info(f"Successfully saved {len(regions) + 1} region files")
         return regions
 
 if __name__ == "__main__":
+    # Set up logging for main function
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('HearthstoneRegionsMain')
+    
     # Test with a sample image
     from screenshot_capture import quick_capture, ScreenCapture
     
-    print("Testing region extraction with color support...")
+    logger.info("Testing region extraction with color support...")
     
     # Capture a test image in COLOR (not grayscale)
     capturer = ScreenCapture()
@@ -170,10 +209,10 @@ if __name__ == "__main__":
     
     # Test hand card detection with color image
     hand_region = regions.get_hand_region(image, color=True)  # Get color hand
-    print(f"Hand region shape: {hand_region.shape} ({'color' if len(hand_region.shape) == 3 else 'grayscale'})")
+    logger.info(f"Hand region shape: {hand_region.shape} ({'color' if len(hand_region.shape) == 3 else 'grayscale'})")
     
     card_boxes = regions.find_card_regions_in_hand(hand_region)
-    print(f"Found {len(card_boxes)} cards in hand")
+    logger.info(f"Found {len(card_boxes)} cards in hand")
     
     for i, (x, y, w, h) in enumerate(card_boxes):
-        print(f"Card {i+1}: position=({x},{y}), size=({w}x{h})")
+        logger.info(f"Card {i+1}: position=({x},{y}), size=({w}x{h})")

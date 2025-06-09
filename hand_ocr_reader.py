@@ -3,6 +3,7 @@ import numpy as np
 import pytesseract
 import os
 import re
+import logging
 from hand_white_mask import HandReader
 import utils
 
@@ -10,6 +11,21 @@ class HandOCRReader:
     """Class to apply OCR to all detected white objects from hand_white_mask.py."""
     
     def __init__(self):
+        # Set up logging
+        self.logger = logging.getLogger('HandOCRReader')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Create file handler if it doesn't exist
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler('logs/hearthstone_debug.log')
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        
         self.hand_reader = HandReader()
         # OCR PARAMETERS - Edit these values to tune performance
         self.ocr_params = {
@@ -37,23 +53,22 @@ class HandOCRReader:
             '--psm 6 -c tessedit_char_whitelist=0123456789',   # Single uniform block
             '--psm 13 -c tessedit_char_whitelist=0123456789',  # Raw line
         ]
+        
+        self.logger.info("HandOCRReader initialized")
     
     def print_ocr_params(self):
-        """Print current OCR parameters for easy adjustment"""
-        print("Current OCR Parameters:")
-        print("-" * 30)
+        """Log current OCR parameters for easy adjustment"""
+        self.logger.info("Current OCR Parameters:")
         for param, value in self.ocr_params.items():
-            print(f"  {param}: {value}")
-        print("-" * 30)
-        print("Tips for adjustment:")
-        print("  - Lower white_threshold (200-220) if numbers aren't pure white")
-        print("  - Increase gaussian_blur kernel for more smoothing")
-        print("  - Increase scale_factor for larger text")
-        print("  - Increase padding for more context")
-        print("  - Modify rotation_angles list to try different tilts")
-        print("  - high_confidence_early_stop: Stop trying methods once this confidence is reached")
-        print("  - low_confidence_skip_angle: Skip remaining PSMs if angle's max confidence is below this")
-        print()
+            self.logger.info(f"  {param}: {value}")
+        self.logger.info("Tips for adjustment:")
+        self.logger.info("  - Lower white_threshold (200-220) if numbers aren't pure white")
+        self.logger.info("  - Increase gaussian_blur kernel for more smoothing")
+        self.logger.info("  - Increase scale_factor for larger text")
+        self.logger.info("  - Increase padding for more context")
+        self.logger.info("  - Modify rotation_angles list to try different tilts")
+        self.logger.info("  - high_confidence_early_stop: Stop trying methods once this confidence is reached")
+        self.logger.info("  - low_confidence_skip_angle: Skip remaining PSMs if angle's max confidence is below this")
     
     def extract_crystal_with_padding(self, hand_image, x, y, w, h):
         """Extract crystal region with padding around the borders"""
@@ -69,6 +84,7 @@ class HandOCRReader:
         # Extract padded region
         padded_crystal = hand_image[y_start:y_end, x_start:x_end]
         
+        self.logger.debug(f"Extracted crystal region with padding: {padding}px")
         return padded_crystal
     
     def add_padding_to_image(self, image, padding_pixels=30):
@@ -89,34 +105,6 @@ class HandOCRReader:
         return padded_image
     
     def rotate_image(self, image, angle):
-        """Rotate image by given angle (degrees) with padding to avoid cropping"""
-        if angle == 0:
-            return image
-        
-        height, width = image.shape[:2]
-        
-        # Calculate the center of the image
-        center = (width // 2, height // 2)
-        
-        # Get rotation matrix
-        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-        
-        # Calculate new dimensions to avoid cropping
-        cos = abs(rotation_matrix[0, 0])
-        sin = abs(rotation_matrix[0, 1])
-        new_width = int((height * sin) + (width * cos))
-        new_height = int((height * cos) + (width * sin))
-        
-        # Adjust rotation matrix for new dimensions
-        rotation_matrix[0, 2] += (new_width / 2) - center[0]
-        rotation_matrix[1, 2] += (new_height / 2) - center[1]
-        
-        # Perform rotation with padding
-        rotated = cv2.warpAffine(image, rotation_matrix, (new_width, new_height), 
-                                flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, 
-                                borderValue=0)
-        
-        return rotated
         """Rotate image by given angle (degrees) with padding to avoid cropping"""
         if angle == 0:
             return image
@@ -190,15 +178,15 @@ class HandOCRReader:
     
     def ocr_crystal(self, crystal_image, crystal_id):
         """Apply OCR to a single crystal image - collect all results and pick best by confidence"""
-        print(f"  OCR on crystal {crystal_id}:")
+        self.logger.debug(f"Starting OCR on crystal {crystal_id}")
         
         all_results = []  # Store all valid results with confidence scores
         high_confidence_threshold = self.ocr_params['high_confidence_early_stop']
         low_confidence_skip_threshold = self.ocr_params['low_confidence_skip_angle']
-        #try 
+        
         # Try different rotation angles
         for angle in self.ocr_params['rotation_angles']:
-            print(f"    Trying rotation: {angle}°")
+            self.logger.debug(f"Trying rotation: {angle}° for crystal {crystal_id}")
             
             # Rotate the crystal image
             rotated_crystal = self.rotate_image(crystal_image, angle)
@@ -209,9 +197,6 @@ class HandOCRReader:
             angle_max_confidence = 0  # Track max confidence for this angle
             angle_results = []  # Store results for this angle
             angle_skip_remaining = False  # Flag to skip remaining PSMs for this angle
-            
-            # Try each PSM mode on white_mask only (no double looping)
-            white_mask, white_mask_inv = self.preprocess_for_ocr(rotated_crystal)
             
             # Try each PSM mode on white_mask_inv
             for config_name, config in zip(["PSM8", "PSM10", "PSM7", "PSM8_LSTM", "PSM6", "PSM13"], self.ocr_configs):
@@ -253,40 +238,34 @@ class HandOCRReader:
                                 }
                                 angle_results.append(result)
                                 all_results.append(result)
-                                print(f"      + {config_name} at {angle}°: '{number}' (confidence: {confidence}%)")
+                                self.logger.debug(f"Crystal {crystal_id} - {config_name} at {angle}°: '{number}' (confidence: {confidence}%)")
                                 
                                 # EARLY STOP: If we hit high confidence, stop trying other PSMs for this angle
                                 if confidence >= high_confidence_threshold:
-                                    print(f"      🎯 High confidence ({confidence}%) reached! Stopping other PSMs for {angle}°")
+                                    self.logger.debug(f"Crystal {crystal_id} - High confidence ({confidence}%) reached! Stopping other PSMs for {angle}°")
                                     angle_skip_remaining = True
                                     break
                                     
                             else:
-                                print(f"      - {config_name} at {angle}°: '{clean_text}' (out of range, conf: {confidence}%)")
+                                self.logger.debug(f"Crystal {crystal_id} - {config_name} at {angle}°: '{clean_text}' (out of range, conf: {confidence}%)")
                         else:
                             if text.strip():
-                                print(f"      - {config_name} at {angle}°: '{text}' (not number, conf: {confidence}%)")
+                                self.logger.debug(f"Crystal {crystal_id} - {config_name} at {angle}°: '{text}' (not number, conf: {confidence}%)")
                     else:
-                        print(f"      - {config_name} at {angle}°: No text found")
-                        # Only skip remaining PSMs if we've tried multiple configs with no results
-                        if config_name in ["PSM8", "PSM10"] and angle == 0:
-                            # If both PSM8 and PSM10 fail at 0°, this might be a problematic image
-                            print(f"      ⚠️  Multiple PSMs failed at {angle}° - continuing with remaining PSMs")
-                        # Remove the automatic skip logic - let all PSMs try
-                        
+                        self.logger.debug(f"Crystal {crystal_id} - {config_name} at {angle}°: No text found")
+                    
                     # LOW CONFIDENCE SKIP: Check if we should skip remaining PSMs after each attempt
                     if angle_max_confidence > 0 and angle_max_confidence < low_confidence_skip_threshold:
-                        print(f"      ⏭️  Angle {angle}° max confidence ({angle_max_confidence}%) below threshold ({low_confidence_skip_threshold}%), skipping remaining PSMs")
+                        self.logger.debug(f"Crystal {crystal_id} - Angle {angle}° max confidence ({angle_max_confidence}%) below threshold ({low_confidence_skip_threshold}%), skipping remaining PSMs")
                         angle_skip_remaining = True
                         break
                     
                 except Exception as e:
-                    print(f"      ✗ {config_name} at {angle}°: Error - {e}")
+                    self.logger.error(f"Crystal {crystal_id} - {config_name} at {angle}°: Error - {e}")
             
             # EARLY STOP: If we found a very high confidence result, consider stopping all angles
             if angle_results and max(r['confidence'] for r in angle_results) >= high_confidence_threshold:
-                print(f"    🎯 Very high confidence ({max(r['confidence'] for r in angle_results)}%) found at {angle}°!")
-                print(f"    🎯 Stopping early - no need to try remaining rotation angles")
+                self.logger.debug(f"Crystal {crystal_id} - Very high confidence ({max(r['confidence'] for r in angle_results)}%) found at {angle}°! Stopping early")
                 break
         
         # Analyze all results and pick the best one
@@ -294,9 +273,9 @@ class HandOCRReader:
             # Sort by confidence (highest first)
             all_results.sort(key=lambda x: x['confidence'], reverse=True)
             
-            print(f"    📊 Found {len(all_results)} valid results:")
+            self.logger.debug(f"Crystal {crystal_id} - Found {len(all_results)} valid results")
             for i, result in enumerate(all_results[:5]):  # Show top 5
-                print(f"      {i+1}. Number '{result['number']}' at {result['angle']}° (confidence: {result['confidence']}%)")
+                self.logger.debug(f"Crystal {crystal_id} - Result {i+1}: Number '{result['number']}' at {result['angle']}° (confidence: {result['confidence']}%)")
             
             # Check if there's a clear winner or if results are close
             best_result = all_results[0]
@@ -310,17 +289,17 @@ class HandOCRReader:
                 most_common = max(set(numbers), key=numbers.count)
                 consensus_count = numbers.count(most_common)
                 
-                print(f"    🤝 Consensus check: {consensus_count}/{len(high_conf_results)} high-conf results agree on '{most_common}'")
+                self.logger.debug(f"Crystal {crystal_id} - Consensus check: {consensus_count}/{len(high_conf_results)} high-conf results agree on '{most_common}'")
                 
                 # If there's strong consensus, prefer that number even if not highest confidence
                 if consensus_count > len(high_conf_results) / 2:
                     consensus_results = [r for r in high_conf_results if r['number'] == most_common]
                     best_result = max(consensus_results, key=lambda x: x['confidence'])
-                    print(f"    ✓ Using consensus result: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                    self.logger.info(f"Crystal {crystal_id} - Using consensus result: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
                 else:
-                    print(f"    ✓ Using highest confidence: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                    self.logger.info(f"Crystal {crystal_id} - Using highest confidence: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
             else:
-                print(f"    ✓ Clear winner: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                self.logger.info(f"Crystal {crystal_id} - Clear winner: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
             
             # Save the best result for debugging (only if DEBUG_IMAGES is True)
             if utils.DEBUG_IMAGES:
@@ -329,13 +308,12 @@ class HandOCRReader:
             
             return best_result['number'], best_result['clean_text'], f"{best_result['angle']}deg_{best_result['method']}_conf{best_result['confidence']}"
         
-        print(f"      ✗ No valid number found at any rotation angle")
+        self.logger.warning(f"Crystal {crystal_id} - No valid number found at any rotation angle")
         return None, "", "failed"
     
     def analyze_all_crystals(self):
         """Analyze all detected crystals and apply OCR to each"""
-        print("Hand OCR Reader - OCR on All Detected Crystals")
-        print("=" * 55)
+        self.logger.info("Starting hand OCR analysis")
         
         # Print current parameters for easy adjustment
         self.print_ocr_params()
@@ -344,28 +322,26 @@ class HandOCRReader:
         try:
             white_mask, crystal_boxes = self.hand_reader.analyze_white_mask()
         except Exception as e:
-            print(f"Error getting crystals from hand_white_mask: {e}")
+            self.logger.error(f"Error getting crystals from hand_white_mask: {e}")
             return
         
         if not crystal_boxes:
-            print("No crystals detected! Check hand_white_mask.py output first.")
+            self.logger.warning("No crystals detected! Check hand_white_mask.py output first.")
             return
         
         # Load original hand image
         hand_image = self.hand_reader.load_hand_image()
         
-        print(f"\nApplying OCR to {len(crystal_boxes)} detected crystals...")
-        print("-" * 55)
+        self.logger.info(f"Applying OCR to {len(crystal_boxes)} detected crystals")
         
         # Sort crystals from left to right based on x-coordinate
         if crystal_boxes:
-            print(f"Sorting crystals from left to right...")
+            self.logger.debug("Sorting crystals from left to right...")
             crystal_boxes.sort(key=lambda box: box[0])  # Sort by x-coordinate (leftmost first)
             
-            # Print sorted order
+            # Log sorted order
             for i, (x, y, w, h) in enumerate(crystal_boxes):
-                print(f"  Crystal {i+1}: x={x} (leftmost to rightmost)")
-            print()
+                self.logger.debug(f"Crystal {i+1}: x={x} (leftmost to rightmost)")
         
         ocr_results = []
         crystal_images = []
@@ -373,7 +349,7 @@ class HandOCRReader:
         # Process each detected crystal
         for i, (x, y, w, h) in enumerate(crystal_boxes):
             crystal_id = i + 1
-            print(f"\nCrystal {crystal_id}: position=({x},{y}), size=({w}x{h})")
+            self.logger.debug(f"Processing crystal {crystal_id}: position=({x},{y}), size=({w}x{h})")
             
             # Extract crystal region WITH PADDING for better border capture
             crystal_region = self.extract_crystal_with_padding(hand_image, x, y, w, h)
@@ -404,8 +380,8 @@ class HandOCRReader:
         # Create summary visualization
         self.create_ocr_visualization(hand_image, crystal_boxes, ocr_results)
         
-        # Print summary
-        self.print_ocr_summary(ocr_results)
+        # Log summary
+        self.log_ocr_summary(ocr_results)
         
         return ocr_results
     
@@ -442,57 +418,58 @@ class HandOCRReader:
         # Save visualization (only if DEBUG_IMAGES is True)
         if utils.DEBUG_IMAGES:
             cv2.imwrite('hand_ocr_results.png', visualization)
-            print(f"\nSaved: hand_ocr_results.png")
+            self.logger.debug("Saved: hand_ocr_results.png")
             
             # Save individual crystal images
             for i in range(len(crystal_boxes)):
-                print(f"Saved: crystal_{i+1}.png")
+                self.logger.debug(f"Saved: crystal_{i+1}.png")
     
-    def print_ocr_summary(self, ocr_results):
-        """Print summary of OCR results"""
-        print(f"\nOCR Summary:")
-        print("=" * 30)
+    def log_ocr_summary(self, ocr_results):
+        """Log summary of OCR results"""
+        self.logger.info("OCR Summary:")
         
         successful = [r for r in ocr_results if r['success']]
         failed = [r for r in ocr_results if not r['success']]
         
-        print(f"Successfully read: {len(successful)}/{len(ocr_results)} crystals")
+        self.logger.info(f"Successfully read: {len(successful)}/{len(ocr_results)} crystals")
         
         if successful:
-            print(f"\nDetected numbers:")
+            self.logger.info("Detected numbers:")
             for result in successful:
-                print(f"  Crystal {result['id']}: {result['number']} (method: {result['method']})")
+                self.logger.info(f"  Crystal {result['id']}: {result['number']} (method: {result['method']})")
         
         if failed:
-            print(f"\nFailed to read:")
+            self.logger.info("Failed to read:")
             for result in failed:
-                print(f"  Crystal {result['id']}: position {result['position'][:2]}")
+                self.logger.info(f"  Crystal {result['id']}: position {result['position'][:2]}")
         
         if utils.DEBUG_IMAGES:
-            print(f"\nFiles generated:")
-            print(f"  - hand_ocr_results.png: Visualization with OCR results")
-            print(f"  - crystal_1.png to crystal_{len(ocr_results)}.png: Individual crystal images (with padding)")
-            print(f"  - crystal_X_white_mask.png: White text isolation (white on black)")
-            print(f"  - crystal_X_white_mask_inv.png: White text isolation (black on white)")
-            print(f"  - crystal_X_BEST_method.png: Successful OCR version (if any)")
+            self.logger.info("Files generated:")
+            self.logger.info("  - hand_ocr_results.png: Visualization with OCR results")
+            self.logger.info(f"  - crystal_1.png to crystal_{len(ocr_results)}.png: Individual crystal images (with padding)")
+            self.logger.info("  - crystal_X_white_mask.png: White text isolation (white on black)")
+            self.logger.info("  - crystal_X_white_mask_inv.png: White text isolation (black on white)")
+            self.logger.info("  - crystal_X_BEST_method.png: Successful OCR version (if any)")
         else:
-            print(f"\nNote: Debug images disabled (utils.DEBUG_IMAGES = False)")
-            print(f"      Set utils.DEBUG_IMAGES = True to generate debug PNG files")
+            self.logger.info("Note: Debug images disabled (utils.DEBUG_IMAGES = False)")
         
-        print(f"\nTip: If no numbers detected, try lowering white_threshold from 240 to 220-235")
-        print(f"Tip: Adjust high_confidence_early_stop (currently {self.ocr_params['high_confidence_early_stop']}%) to stop early when confident")
-        print(f"Tip: Adjust low_confidence_skip_angle (currently {self.ocr_params['low_confidence_skip_angle']}%) to skip poor angles faster")
+        self.logger.info(f"Tip: If no numbers detected, try lowering white_threshold from 240 to 220-235")
+        self.logger.info(f"Tip: Adjust high_confidence_early_stop (currently {self.ocr_params['high_confidence_early_stop']}%) to stop early when confident")
+        self.logger.info(f"Tip: Adjust low_confidence_skip_angle (currently {self.ocr_params['low_confidence_skip_angle']}%) to skip poor angles faster")
 
 
 def main():
     """Main function to run OCR analysis on detected crystals"""
-    print("Starting OCR analysis on detected white crystals...")
+    # Set up logging for main function
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('HandOCRMain')
+    
+    logger.info("Starting OCR analysis on detected white crystals...")
     
     # Check if test_hand.png exists
     file_name = "images/preprocess_hand.png"
     if not os.path.exists(file_name):
-        print(f"Error: {file_name} not found!")
-        print("Please run hearthstone_regions.py first to generate this file.")
+        logger.error(f"{file_name} not found! Please run hearthstone_regions.py first to generate this file.")
         return
     
     try:
@@ -506,12 +483,12 @@ def main():
             # Count successful OCR results
             numbers_found = [r['number'] for r in results if r['success']]
             if numbers_found:
-                print(f"\n🎯 Successfully extracted {len(numbers_found)} mana costs: {numbers_found}")
+                logger.info(f"Successfully extracted {len(numbers_found)} mana costs: {numbers_found}")
             else:
-                print(f"\n⚠️  No valid numbers detected. Check individual crystal images for debugging.")
+                logger.warning("No valid numbers detected. Check individual crystal images for debugging.")
         
     except Exception as e:
-        print(f"✗ Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
 

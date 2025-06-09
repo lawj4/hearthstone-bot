@@ -1,12 +1,28 @@
 import cv2
 import numpy as np
 import os
+import logging
 import utils
 
 class AllyBoardReader:
     """Class specifically for reading cards from test_ally_board.png using color mask detection"""
     
     def __init__(self):
+        # Set up logging
+        self.logger = logging.getLogger('AllyBoardReader')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Create file handler if it doesn't exist
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler('logs/hearthstone_debug.log')
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        
         # Define target colors in BGR format (OpenCV uses BGR, not RGB)
         self.target_colors = {
             'red': np.array([35, 52, 234]),    # RGB(234,52,35) -> BGR(35,52,234)
@@ -24,16 +40,21 @@ class AllyBoardReader:
             'min_height': 8,         # Minimum height of crystal itself
             'max_height': 100        # Maximum height of crystal itself
         }
+        
+        self.logger.info("AllyBoardReader initialized")
     
     def load_ally_board_image(self):
         """Load test_ally_board.png file"""
         if not os.path.exists('images/preprocess_ally_board.png'):
+            self.logger.error("images/preprocess_ally_board.png not found! Please run hearthstone_regions.py first.")
             raise FileNotFoundError("images/preprocess_ally_board.png not found! Please run hearthstone_regions.py first.")
         
         ally_board_image = cv2.imread('images/preprocess_ally_board.png', cv2.IMREAD_COLOR)
         if ally_board_image is None:
+            self.logger.error("Could not load images/preprocess_ally_board.png")
             raise ValueError("Could not load images/preprocess_ally_board.png")
         
+        self.logger.debug(f"Loaded ally board image with shape: {ally_board_image.shape}")
         return ally_board_image
     
     def detect_color_regions(self, ally_board_image):
@@ -70,17 +91,17 @@ class AllyBoardReader:
         lower_bound = np.clip(target_color - self.color_tolerance, 0, 255)
         upper_bound = np.clip(target_color + self.color_tolerance, 0, 255)
         
-        print(f"  {color_name.capitalize()} color detection:")
-        print(f"    Target BGR: {target_color}")
-        print(f"    Lower bound: {lower_bound}")
-        print(f"    Upper bound: {upper_bound}")
+        self.logger.debug(f"{color_name.capitalize()} color detection:")
+        self.logger.debug(f"  Target BGR: {target_color}")
+        self.logger.debug(f"  Lower bound: {lower_bound}")
+        self.logger.debug(f"  Upper bound: {upper_bound}")
         
         # Create mask for this color range
         mask = cv2.inRange(image, lower_bound, upper_bound)
         
         # Count pixels found
         color_pixels = np.sum(mask == 255)
-        print(f"    Found {color_pixels} {color_name} pixels")
+        self.logger.debug(f"  Found {color_pixels} {color_name} pixels")
         
         return mask
     
@@ -99,9 +120,9 @@ class AllyBoardReader:
         
         # Count pixels found
         white_pixels = np.sum(white_mask == 255)
-        print(f"  White color detection:")
-        print(f"    Threshold: {self.white_threshold}")
-        print(f"    Found {white_pixels} white pixels")
+        self.logger.debug(f"White color detection:")
+        self.logger.debug(f"  Threshold: {self.white_threshold}")
+        self.logger.debug(f"  Found {white_pixels} white pixels")
         
         return white_mask
     
@@ -117,13 +138,12 @@ class AllyBoardReader:
         valid_contours = []
         rejected_crystals = []
         
-        print(f"  Image dimensions: {image_width}x{image_height}")
-        print(f"  Height restrictions:")
-        print(f"    Min top border: {self.height_restrictions['min_top_border']}px")
-        print(f"    Min bottom border: {self.height_restrictions['min_bottom_border']}px")
-        print(f"    Min crystal height: {self.height_restrictions['min_height']}px")
-        print(f"    Max crystal height: {self.height_restrictions['max_height']}px")
-        print()
+        self.logger.debug(f"Image dimensions: {image_width}x{image_height}")
+        self.logger.debug("Height restrictions:")
+        self.logger.debug(f"  Min top border: {self.height_restrictions['min_top_border']}px")
+        self.logger.debug(f"  Min bottom border: {self.height_restrictions['min_bottom_border']}px")
+        self.logger.debug(f"  Min crystal height: {self.height_restrictions['min_height']}px")
+        self.logger.debug(f"  Max crystal height: {self.height_restrictions['max_height']}px")
         
         for i, contour in enumerate(contours):
             # Get bounding rectangle for each crystal
@@ -170,7 +190,7 @@ class AllyBoardReader:
             if valid:
                 crystal_boxes.append((x, y, w, h))
                 valid_contours.append(contour)
-                print(f"  ✓ Crystal {len(crystal_boxes)}: pos=({x},{y}), size=({w}x{h}), area={area}, top_border={top_border}px, bottom_border={bottom_border}px")
+                self.logger.debug(f"✓ Crystal {len(crystal_boxes)}: pos=({x},{y}), size=({w}x{h}), area={area}, top_border={top_border}px, bottom_border={bottom_border}px")
             else:
                 rejected_crystals.append({
                     'position': (x, y, w, h),
@@ -179,13 +199,13 @@ class AllyBoardReader:
                     'bottom_border': bottom_border,
                     'reasons': rejection_reasons
                 })
-                print(f"  ✗ Rejected: pos=({x},{y}), size=({w}x{h}) - {', '.join(rejection_reasons)}")
+                self.logger.debug(f"✗ Rejected: pos=({x},{y}), size=({w}x{h}) - {', '.join(rejection_reasons)}")
         
-        print(f"\nSummary: {len(crystal_boxes)} valid crystals, {len(rejected_crystals)} rejected")
+        self.logger.info(f"Summary: {len(crystal_boxes)} valid crystals, {len(rejected_crystals)} rejected")
         
         # Sort crystals from left to right based on x-coordinate
         if crystal_boxes:
-            print(f"\nSorting crystals from left to right...")
+            self.logger.debug("Sorting crystals from left to right...")
             
             # Create list of (crystal_box, contour) pairs for sorting
             crystal_contour_pairs = list(zip(crystal_boxes, valid_contours))
@@ -197,22 +217,22 @@ class AllyBoardReader:
             crystal_boxes = [pair[0] for pair in crystal_contour_pairs]
             valid_contours = [pair[1] for pair in crystal_contour_pairs]
             
-            # Print sorted order
+            # Log sorted order
             for i, (x, y, w, h) in enumerate(crystal_boxes):
-                print(f"  Crystal {i+1}: x={x} (leftmost to rightmost)")
+                self.logger.debug(f"Crystal {i+1}: x={x} (leftmost to rightmost)")
         
         return crystal_boxes, valid_contours
     
     def analyze_color_mask(self):
         """Analyze color mask from images/preprocess_ally_board.png and save results"""
-        print("Loading images/preprocess_ally_board.png...")
+        self.logger.info("Loading images/preprocess_ally_board.png...")
         
         # Load ally board image
         ally_board_image = self.load_ally_board_image()
-        print(f"Ally board image shape: {ally_board_image.shape}")
+        self.logger.info(f"Ally board image shape: {ally_board_image.shape}")
         
         # Create color masks
-        print(f"\nDetecting colors with tolerance ±{self.color_tolerance}:")
+        self.logger.debug(f"Detecting colors with tolerance ±{self.color_tolerance}:")
         combined_mask, red_mask, green_mask, white_mask = self.detect_color_regions(ally_board_image)
         
         # Calculate statistics
@@ -220,14 +240,14 @@ class AllyBoardReader:
         color_pixels = np.sum(combined_mask == 255)
         color_percentage = (color_pixels / total_pixels) * 100
         
-        print(f"\nColor mask statistics:")
-        print(f"  Total pixels: {total_pixels}")
-        print(f"  Color pixels found: {color_pixels}")
-        print(f"  Color percentage: {color_percentage:.2f}%")
+        self.logger.debug("Color mask statistics:")
+        self.logger.debug(f"  Total pixels: {total_pixels}")
+        self.logger.debug(f"  Color pixels found: {color_pixels}")
+        self.logger.debug(f"  Color percentage: {color_percentage:.2f}%")
         
         # Extract individual crystals using contours
         crystal_boxes, valid_contours = self.extract_individual_crystals(combined_mask)
-        print(f"Found {len(crystal_boxes)} crystals using contour detection")
+        self.logger.info(f"Found {len(crystal_boxes)} crystals using contour detection")
         
         # Create visualization with contours and bounding boxes
         visualization = ally_board_image.copy()
@@ -248,14 +268,14 @@ class AllyBoardReader:
             cv2.imwrite('ally_board_green_mask.png', green_mask)
             cv2.imwrite('ally_board_white_mask.png', white_mask)
             cv2.imwrite('ally_board_combined_mask.png', combined_mask)
-            print("Saved: ally_board_red_mask.png")
-            print("Saved: ally_board_green_mask.png") 
-            print("Saved: ally_board_white_mask.png")
-            print("Saved: ally_board_combined_mask.png")
+            self.logger.debug("Saved: ally_board_red_mask.png")
+            self.logger.debug("Saved: ally_board_green_mask.png") 
+            self.logger.debug("Saved: ally_board_white_mask.png")
+            self.logger.debug("Saved: ally_board_combined_mask.png")
             
             # Save visualization with contours
             cv2.imwrite('ally_board_crystal_contours.png', visualization)
-            print("Saved: ally_board_crystal_contours.png")
+            self.logger.debug("Saved: ally_board_crystal_contours.png")
             
             # Create comprehensive comparison: original | red | green | white | combined | contours
             comparison = np.zeros((ally_board_image.shape[0], ally_board_image.shape[1] * 6, 3), dtype=np.uint8)
@@ -267,9 +287,9 @@ class AllyBoardReader:
             comparison[:, ally_board_image.shape[1]*5:] = visualization
             
             cv2.imwrite('ally_board_color_analysis.png', comparison)
-            print("Saved: ally_board_color_analysis.png")
+            self.logger.debug("Saved: ally_board_color_analysis.png")
         else:
-            print("Debug images disabled (utils.DEBUG_IMAGES = False)")
+            self.logger.debug("Debug images disabled (utils.DEBUG_IMAGES = False)")
         
         return combined_mask, crystal_boxes
     
@@ -279,18 +299,20 @@ class AllyBoardReader:
 
 def main():
     """Test color mask detection with contour analysis on ally board"""
-    print("Hearthstone Ally Board Reader - Color Mask Detection")
-    print("=" * 55)
-    print("Target colors:")
-    print("  Red: RGB(234,52,35) -> BGR(35,52,234)")
-    print("  Green: RGB(117,251,76) -> BGR(76,251,117)")
-    print("  White: RGB(255,255,255) -> BGR(255,255,255)")
-    print()
+    # Set up logging for main function
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('AllyBoardMain')
+    
+    logger.info("Hearthstone Ally Board Reader - Color Mask Detection")
+    logger.info("Target colors:")
+    logger.info("  Red: RGB(234,52,35) -> BGR(35,52,234)")
+    logger.info("  Green: RGB(117,251,76) -> BGR(76,251,117)")
+    logger.info("  White: RGB(255,255,255) -> BGR(255,255,255)")
     
     # Check if test_ally_board.png exists
     if not os.path.exists('images/preprocess_ally_board.png'):
-        print("Error: images/preprocess_ally_board.png not found!")
-        print("Please run hearthstone_regions.py first to generate this file.")
+        logger.error("images/preprocess_ally_board.png not found!")
+        logger.error("Please run hearthstone_regions.py first to generate this file.")
         return
     
     try:
@@ -300,39 +322,38 @@ def main():
         # Analyze color mask and extract crystals
         combined_mask, crystal_boxes = reader.analyze_color_mask()
         
-        print(f"\n✓ Successfully detected {len(crystal_boxes)} crystals!")
+        logger.info(f"Successfully detected {len(crystal_boxes)} crystals!")
         if utils.DEBUG_IMAGES:
-            print(f"✓ Check ally_board_color_analysis.png for full visualization")
+            logger.info("Check ally_board_color_analysis.png for full visualization")
         
         # Summary
         if len(crystal_boxes) >= 1:
-            print(f"🎯 Found {len(crystal_boxes)} colored regions on ally board")
+            logger.info(f"Found {len(crystal_boxes)} colored regions on ally board")
         else:
-            print(f"⚠️  No colored regions found - might need to adjust color tolerance")
+            logger.warning("No colored regions found - might need to adjust color tolerance")
             
     except Exception as e:
-        print(f"✗ Error: {e}")
+        logger.error(f"Error: {e}")
     
     if utils.DEBUG_IMAGES:
-        print("\nGenerated files:")
-        print("  - ally_board_red_mask.png: Red color mask only")
-        print("  - ally_board_green_mask.png: Green color mask only") 
-        print("  - ally_board_white_mask.png: White color mask only")
-        print("  - ally_board_combined_mask.png: Combined red + green + white mask")
-        print("  - ally_board_crystal_contours.png: Contours + bounding boxes")
-        print("  - ally_board_color_analysis.png: Original | Red | Green | White | Combined | Contours")
+        logger.info("Generated files:")
+        logger.info("  - ally_board_red_mask.png: Red color mask only")
+        logger.info("  - ally_board_green_mask.png: Green color mask only") 
+        logger.info("  - ally_board_white_mask.png: White color mask only")
+        logger.info("  - ally_board_combined_mask.png: Combined red + green + white mask")
+        logger.info("  - ally_board_crystal_contours.png: Contours + bounding boxes")
+        logger.info("  - ally_board_color_analysis.png: Original | Red | Green | White | Combined | Contours")
     else:
-        print("\nNote: Debug images disabled (utils.DEBUG_IMAGES = False)")
-        print("      Set utils.DEBUG_IMAGES = True to generate debug PNG files")
+        logger.info("Note: Debug images disabled (utils.DEBUG_IMAGES = False)")
     
-    print("\nTo adjust sensitivity:")
-    print("  - Increase color_tolerance (currently 30) to detect more color variations")
-    print("  - Decrease color_tolerance to be more strict with exact color matching")
-    print("  - Adjust white_threshold (currently 240) for white detection sensitivity")
-    print("\nTo adjust height restrictions:")
-    print("  - min_top_border: Minimum pixels from top edge to crystal")
-    print("  - min_bottom_border: Minimum pixels from crystal to bottom edge") 
-    print("  - min_height/max_height: Crystal size limits")
+    logger.info("To adjust sensitivity:")
+    logger.info("  - Increase color_tolerance (currently 30) to detect more color variations")
+    logger.info("  - Decrease color_tolerance to be more strict with exact color matching")
+    logger.info("  - Adjust white_threshold (currently 240) for white detection sensitivity")
+    logger.info("To adjust height restrictions:")
+    logger.info("  - min_top_border: Minimum pixels from top edge to crystal")
+    logger.info("  - min_bottom_border: Minimum pixels from crystal to bottom edge") 
+    logger.info("  - min_height/max_height: Crystal size limits")
 
 if __name__ == "__main__":
     main()

@@ -1,2 +1,3 @@
 IMAGE_DIR = 'images'
-DEBUG_IMAGES = False
+DEBUG_IMAGES = True
+BUFFER = 5

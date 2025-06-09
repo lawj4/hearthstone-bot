@@ -3,6 +3,7 @@ import numpy as np
 import pytesseract
 import os
 import re
+import logging
 from hero_health_color_mask import HeroHealthReader
 import utils
 
@@ -10,6 +11,21 @@ class HeroHealthOCRReader:
     """Class to apply OCR to detected health regions from hero_health_color_mask.py."""
     
     def __init__(self):
+        # Set up logging
+        self.logger = logging.getLogger('HeroHealthOCRReader')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Create file handler if it doesn't exist
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler('logs/hearthstone_debug.log')
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        
         self.health_reader = HeroHealthReader()
         # OCR PARAMETERS - Edit these values to tune performance
         self.ocr_params = {
@@ -37,23 +53,22 @@ class HeroHealthOCRReader:
             '--psm 8 --oem 1 -c tessedit_char_whitelist=0123456789',  # LSTM only
             '--psm 13 -c tessedit_char_whitelist=0123456789',  # Raw line
         ]
+        
+        self.logger.info("HeroHealthOCRReader initialized")
     
     def print_ocr_params(self):
-        """Print current OCR parameters for easy adjustment"""
-        print("Current OCR Parameters:")
-        print("-" * 30)
+        """Log current OCR parameters for easy adjustment"""
+        self.logger.info("Current OCR Parameters:")
         for param, value in self.ocr_params.items():
-            print(f"  {param}: {value}")
-        print("-" * 30)
-        print("Tips for adjustment:")
-        print("  - Lower white_threshold (200-220) if numbers aren't pure white")
-        print("  - Increase gaussian_blur kernel for more smoothing")
-        print("  - Increase scale_factor for larger text")
-        print("  - Increase padding for more context")
-        print("  - Modify rotation_angles list to try different tilts")
-        print("  - high_confidence_early_stop: Stop trying methods once this confidence is reached")
-        print("  - low_confidence_skip_angle: Skip remaining PSMs if angle's max confidence is below this")
-        print()
+            self.logger.info(f"  {param}: {value}")
+        self.logger.info("Tips for adjustment:")
+        self.logger.info("  - Lower white_threshold (200-220) if numbers aren't pure white")
+        self.logger.info("  - Increase gaussian_blur kernel for more smoothing")
+        self.logger.info("  - Increase scale_factor for larger text")
+        self.logger.info("  - Increase padding for more context")
+        self.logger.info("  - Modify rotation_angles list to try different tilts")
+        self.logger.info("  - high_confidence_early_stop: Stop trying methods once this confidence is reached")
+        self.logger.info("  - low_confidence_skip_angle: Skip remaining PSMs if angle's max confidence is below this")
     
     def extract_health_region_with_padding(self, health_image, x, y, w, h):
         """Extract health region with padding around the borders"""
@@ -69,6 +84,7 @@ class HeroHealthOCRReader:
         # Extract padded region
         padded_region = health_image[y_start:y_end, x_start:x_end]
         
+        self.logger.debug(f"Extracted health region with padding: {padding}px")
         return padded_region
     
     def add_padding_to_image(self, image, padding_pixels=30):
@@ -166,14 +182,14 @@ class HeroHealthOCRReader:
             total_colored_pixels = np.sum(combined_mask == 255)
             total_pixels = combined_mask.shape[0] * combined_mask.shape[1]
             
-            print(f"      Color detection: Red={red_pixels}px, Green={green_pixels}px, White={white_pixels}px, WhiteThresh={white_thresh_pixels}px")
-            print(f"      Total colored pixels: {total_colored_pixels} ({(total_colored_pixels/total_pixels)*100:.1f}%)")
+            self.logger.debug(f"Color detection: Red={red_pixels}px, Green={green_pixels}px, White={white_pixels}px, WhiteThresh={white_thresh_pixels}px")
+            self.logger.debug(f"Total colored pixels: {total_colored_pixels} ({(total_colored_pixels/total_pixels)*100:.1f}%)")
             
             if total_colored_pixels > 10:  # Found some colored pixels
                 final_mask = combined_mask
                 method_used = "color_detection"
             else:
-                print(f"      No colored pixels found, falling back to grayscale")
+                self.logger.debug("No colored pixels found, falling back to grayscale")
         
         # METHOD 2: Fallback to grayscale if color detection failed or no color image
         if final_mask is None:
@@ -197,13 +213,13 @@ class HeroHealthOCRReader:
             if best_mask is not None:
                 final_mask = best_mask
                 method_used = f"grayscale_thresh_{best_threshold}"
-                print(f"      Grayscale detection: {best_pixel_count} pixels at threshold {best_threshold}")
+                self.logger.debug(f"Grayscale detection: {best_pixel_count} pixels at threshold {best_threshold}")
             else:
                 # Last resort - use adaptive threshold
                 final_mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
                 method_used = "adaptive_threshold"
                 adaptive_pixels = np.sum(final_mask == 255)
-                print(f"      Adaptive threshold: {adaptive_pixels} pixels")
+                self.logger.debug(f"Adaptive threshold: {adaptive_pixels} pixels")
         
         # Clean up the mask
         if final_mask is not None:
@@ -240,7 +256,7 @@ class HeroHealthOCRReader:
         # ADD SIGNIFICANT PADDING to help OCR recognition
         padded_inv = self.add_padding_to_image(scaled_clean_inv, padding_pixels=30)
         
-        print(f"      Processing method: {method_used}")
+        self.logger.debug(f"Processing method: {method_used}")
         
         return scaled_clean, padded_inv
     
@@ -253,7 +269,7 @@ class HeroHealthOCRReader:
     
     def ocr_health_region(self, health_region, region_id, health_type):
         """Apply OCR to a single health region - collect all results and pick best by confidence"""
-        print(f"  OCR on {health_type} health region {region_id}:")
+        self.logger.debug(f"Starting OCR on {health_type} health region {region_id}")
         
         all_results = []  # Store all valid results with confidence scores
         high_confidence_threshold = self.ocr_params['high_confidence_early_stop']
@@ -261,7 +277,7 @@ class HeroHealthOCRReader:
         
         # Try different rotation angles
         for angle in self.ocr_params['rotation_angles']:
-            print(f"    Trying rotation: {angle}°")
+            self.logger.debug(f"Trying rotation: {angle}° for {health_type} health region {region_id}")
             
             # Rotate the health region
             rotated_region = self.rotate_image(health_region, angle)
@@ -313,35 +329,34 @@ class HeroHealthOCRReader:
                                 }
                                 angle_results.append(result)
                                 all_results.append(result)
-                                print(f"      + {config_name} at {angle}°: '{number}' (confidence: {confidence}%)")
+                                self.logger.debug(f"{health_type} health region {region_id} - {config_name} at {angle}°: '{number}' (confidence: {confidence}%)")
                                 
                                 # EARLY STOP: If we hit high confidence, stop trying other PSMs for this angle
                                 if confidence >= high_confidence_threshold:
-                                    print(f"      🎯 High confidence ({confidence}%) reached! Stopping other PSMs for {angle}°")
+                                    self.logger.debug(f"{health_type} health region {region_id} - High confidence ({confidence}%) reached! Stopping other PSMs for {angle}°")
                                     angle_skip_remaining = True
                                     break
                                     
                             else:
-                                print(f"      - {config_name} at {angle}°: '{clean_text}' (out of range 1-99, conf: {confidence}%)")
+                                self.logger.debug(f"{health_type} health region {region_id} - {config_name} at {angle}°: '{clean_text}' (out of range 1-99, conf: {confidence}%)")
                         else:
                             if text.strip():
-                                print(f"      - {config_name} at {angle}°: '{text}' (not number, conf: {confidence}%)")
+                                self.logger.debug(f"{health_type} health region {region_id} - {config_name} at {angle}°: '{text}' (not number, conf: {confidence}%)")
                     else:
-                        print(f"      - {config_name} at {angle}°: No text found")
+                        self.logger.debug(f"{health_type} health region {region_id} - {config_name} at {angle}°: No text found")
                         
                     # LOW CONFIDENCE SKIP: Check if we should skip remaining PSMs after each attempt
                     if angle_max_confidence > 0 and angle_max_confidence < low_confidence_skip_threshold:
-                        print(f"      ⏭️  Angle {angle}° max confidence ({angle_max_confidence}%) below threshold ({low_confidence_skip_threshold}%), skipping remaining PSMs")
+                        self.logger.debug(f"{health_type} health region {region_id} - Angle {angle}° max confidence ({angle_max_confidence}%) below threshold ({low_confidence_skip_threshold}%), skipping remaining PSMs")
                         angle_skip_remaining = True
                         break
                     
                 except Exception as e:
-                    print(f"      ✗ {config_name} at {angle}°: Error - {e}")
+                    self.logger.error(f"{health_type} health region {region_id} - {config_name} at {angle}°: Error - {e}")
             
             # EARLY STOP: If we found a very high confidence result, consider stopping all angles
             if angle_results and max(r['confidence'] for r in angle_results) >= high_confidence_threshold:
-                print(f"    🎯 Very high confidence ({max(r['confidence'] for r in angle_results)}%) found at {angle}°!")
-                print(f"    🎯 Stopping early - no need to try remaining rotation angles")
+                self.logger.debug(f"{health_type} health region {region_id} - Very high confidence ({max(r['confidence'] for r in angle_results)}%) found at {angle}°! Stopping early")
                 break
         
         # Analyze all results and pick the best one
@@ -349,9 +364,9 @@ class HeroHealthOCRReader:
             # Sort by confidence (highest first)
             all_results.sort(key=lambda x: x['confidence'], reverse=True)
             
-            print(f"    📊 Found {len(all_results)} valid results:")
+            self.logger.debug(f"{health_type} health region {region_id} - Found {len(all_results)} valid results")
             for i, result in enumerate(all_results[:5]):  # Show top 5
-                print(f"      {i+1}. Number '{result['number']}' at {result['angle']}° (confidence: {result['confidence']}%)")
+                self.logger.debug(f"{health_type} health region {region_id} - Result {i+1}: Number '{result['number']}' at {result['angle']}° (confidence: {result['confidence']}%)")
             
             # Check if there's a clear winner or if results are close
             best_result = all_results[0]
@@ -365,17 +380,17 @@ class HeroHealthOCRReader:
                 most_common = max(set(numbers), key=numbers.count)
                 consensus_count = numbers.count(most_common)
                 
-                print(f"    🤝 Consensus check: {consensus_count}/{len(high_conf_results)} high-conf results agree on '{most_common}'")
+                self.logger.debug(f"{health_type} health region {region_id} - Consensus check: {consensus_count}/{len(high_conf_results)} high-conf results agree on '{most_common}'")
                 
                 # If there's strong consensus, prefer that number even if not highest confidence
                 if consensus_count > len(high_conf_results) / 2:
                     consensus_results = [r for r in high_conf_results if r['number'] == most_common]
                     best_result = max(consensus_results, key=lambda x: x['confidence'])
-                    print(f"    ✓ Using consensus result: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                    self.logger.info(f"{health_type} health region {region_id} - Using consensus result: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
                 else:
-                    print(f"    ✓ Using highest confidence: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                    self.logger.info(f"{health_type} health region {region_id} - Using highest confidence: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
             else:
-                print(f"    ✓ Clear winner: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
+                self.logger.info(f"{health_type} health region {region_id} - Clear winner: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
             
             # Save the best result for debugging (only if DEBUG_IMAGES is True)
             if utils.DEBUG_IMAGES:
@@ -384,30 +399,28 @@ class HeroHealthOCRReader:
             
             return best_result['number'], best_result['clean_text'], f"{best_result['angle']}deg_{best_result['method']}_conf{best_result['confidence']}"
         
-        print(f"      ✗ No valid number found at any rotation angle")
+        self.logger.warning(f"{health_type} health region {region_id} - No valid number found at any rotation angle")
         return None, "", "failed"
     
     def analyze_health_regions(self, health_type='enemy'):
         """Analyze health regions for enemy or ally and apply OCR to each detected region"""
-        print(f"\n{health_type.capitalize()} Health OCR Analysis")
-        print("=" * 40)
+        self.logger.info(f"Starting {health_type} health OCR analysis")
         
         # Get color mask and health regions from hero_health_color_mask
         try:
             combined_mask, color_boxes, color_analysis = self.health_reader.analyze_health_colors(health_type)
         except Exception as e:
-            print(f"Error getting health regions from hero_health_color_mask: {e}")
+            self.logger.error(f"Error getting {health_type} health regions from hero_health_color_mask: {e}")
             return None
         
         if not color_boxes:
-            print(f"No {health_type} health regions detected! Check hero_health_color_mask.py output first.")
+            self.logger.warning(f"No {health_type} health regions detected! Check hero_health_color_mask.py output first.")
             return None
         
         # Load original health image
         health_image = self.health_reader.load_health_image(health_type)
         
-        print(f"\nApplying OCR to {len(color_boxes)} detected {health_type} health regions...")
-        print("-" * 40)
+        self.logger.info(f"Applying OCR to {len(color_boxes)} detected {health_type} health regions")
         
         ocr_results = []
         region_images = []
@@ -415,7 +428,7 @@ class HeroHealthOCRReader:
         # Process each detected health region
         for i, (x, y, w, h) in enumerate(color_boxes):
             region_id = i + 1
-            print(f"\n{health_type.capitalize()} Health Region {region_id}: position=({x},{y}), size=({w}x{h})")
+            self.logger.debug(f"Processing {health_type} health region {region_id}: position=({x},{y}), size=({w}x{h})")
             
             # Extract health region WITH PADDING for better border capture
             health_region = self.extract_health_region_with_padding(health_image, x, y, w, h)
@@ -450,7 +463,7 @@ class HeroHealthOCRReader:
                 else:
                     cv2.imwrite(f'{health_type}_health_region_{region_id}_original_gray.png', health_region)
                 
-                print(f"        Debug: Saved region images for inspection")
+                self.logger.debug(f"Saved debug images for {health_type} health region {region_id}")
         
         # Create summary visualization
         self.create_health_ocr_visualization(health_image, color_boxes, ocr_results, health_type)
@@ -459,8 +472,7 @@ class HeroHealthOCRReader:
     
     def analyze_both_health_regions(self):
         """Analyze both enemy and ally health regions and return combined results"""
-        print("Hero Health OCR Reader - OCR on All Detected Health Regions")
-        print("=" * 65)
+        self.logger.info("Starting Hero Health OCR analysis for both enemy and ally")
         
         # Print current parameters for easy adjustment
         self.print_ocr_params()
@@ -470,32 +482,31 @@ class HeroHealthOCRReader:
         for health_type in ['enemy', 'ally']:
             filename = f'images/preprocess_{health_type}_health.png'
             if not os.path.exists(filename):
-                print(f"Warning: {filename} not found! Skipping {health_type} health analysis.")
+                self.logger.warning(f"{filename} not found! Skipping {health_type} health analysis.")
                 results[health_type] = None
                 continue
             
             ocr_results = self.analyze_health_regions(health_type)
             results[health_type] = ocr_results
             
-            # Print summary for this health type
+            # Log summary for this health type
             if ocr_results:
                 successful = [r for r in ocr_results if r['success']]
-                print(f"\n{health_type.capitalize()} Health Summary:")
-                print(f"Successfully read: {len(successful)}/{len(ocr_results)} regions")
+                self.logger.info(f"{health_type.capitalize()} Health Summary: Successfully read {len(successful)}/{len(ocr_results)} regions")
                 
                 if successful:
                     health_values = [r['number'] for r in successful]
-                    print(f"Detected health values: {health_values}")
+                    self.logger.info(f"Detected {health_type} health values: {health_values}")
                     
                     # For health, we typically expect only 1 region per hero
                     if len(successful) == 1:
-                        print(f"🎯 Perfect! Found {health_type} health: {successful[0]['number']}")
+                        self.logger.info(f"Perfect! Found {health_type} health: {successful[0]['number']}")
                     elif len(successful) > 1:
-                        print(f"⚠️  Multiple health values detected - using highest confidence")
+                        self.logger.info(f"Multiple {health_type} health values detected - using highest confidence")
                         best_result = max(successful, key=lambda x: int(x['method'].split('conf')[1]) if 'conf' in x['method'] else 0)
-                        print(f"🎯 Best {health_type} health: {best_result['number']}")
+                        self.logger.info(f"Best {health_type} health: {best_result['number']}")
                 else:
-                    print(f"⚠️  No valid health numbers detected for {health_type}")
+                    self.logger.warning(f"No valid {health_type} health numbers detected")
         
         return results
     
@@ -532,20 +543,19 @@ class HeroHealthOCRReader:
         # Save visualization (only if DEBUG_IMAGES is True)
         if utils.DEBUG_IMAGES:
             cv2.imwrite(f'{health_type}_health_ocr_results.png', visualization)
-            print(f"\nSaved: {health_type}_health_ocr_results.png")
+            self.logger.debug(f"Saved: {health_type}_health_ocr_results.png")
             
             # Save individual region images
             for i in range(len(color_boxes)):
-                print(f"Saved: {health_type}_health_region_{i+1}.png")
+                self.logger.debug(f"Saved: {health_type}_health_region_{i+1}.png")
     
-    def print_final_summary(self, results):
-        """Print final summary of all health OCR results"""
-        print(f"\nFinal Health OCR Summary:")
-        print("=" * 40)
+    def log_final_summary(self, results):
+        """Log final summary of all health OCR results"""
+        self.logger.info("Final Health OCR Summary:")
         
         for health_type, ocr_results in results.items():
             if ocr_results is None:
-                print(f"{health_type.capitalize()} health: File not found")
+                self.logger.info(f"{health_type.capitalize()} health: File not found")
                 continue
                 
             successful = [r for r in ocr_results if r['success']]
@@ -554,34 +564,37 @@ class HeroHealthOCRReader:
                 # Get the best result (highest confidence)
                 if len(successful) == 1:
                     health_value = successful[0]['number']
-                    print(f"{health_type.capitalize()} health: {health_value}")
+                    self.logger.info(f"{health_type.capitalize()} health: {health_value}")
                 else:
                     # Multiple results - pick highest confidence
                     best_result = max(successful, key=lambda x: int(x['method'].split('conf')[1]) if 'conf' in x['method'] else 0)
                     health_value = best_result['number']
-                    print(f"{health_type.capitalize()} health: {health_value} (best of {len(successful)} detections)")
+                    self.logger.info(f"{health_type.capitalize()} health: {health_value} (best of {len(successful)} detections)")
             else:
-                print(f"{health_type.capitalize()} health: Not detected")
+                self.logger.warning(f"{health_type.capitalize()} health: Not detected")
         
         if utils.DEBUG_IMAGES:
-            print(f"\nFiles generated:")
+            self.logger.info("Files generated:")
             for health_type in ['enemy', 'ally']:
                 if results.get(health_type):
-                    print(f"  - {health_type}_health_ocr_results.png: Visualization with OCR results")
-                    print(f"  - {health_type}_health_region_X.png: Individual region images (with padding)")
-                    print(f"  - {health_type}_health_region_X_processed_mask.png: Color/text isolation")
-                    print(f"  - {health_type}_health_region_X_BEST_method.png: Successful OCR version (if any)")
+                    self.logger.info(f"  - {health_type}_health_ocr_results.png: Visualization with OCR results")
+                    self.logger.info(f"  - {health_type}_health_region_X.png: Individual region images (with padding)")
+                    self.logger.info(f"  - {health_type}_health_region_X_processed_mask.png: Color/text isolation")
+                    self.logger.info(f"  - {health_type}_health_region_X_BEST_method.png: Successful OCR version (if any)")
         else:
-            print(f"\nNote: Debug images disabled (utils.DEBUG_IMAGES = False)")
-            print(f"      Set utils.DEBUG_IMAGES = True to generate debug PNG files")
+            self.logger.info("Note: Debug images disabled (utils.DEBUG_IMAGES = False)")
         
-        print(f"\nTip: If no numbers detected, try lowering white_threshold from 220 to 180-200")
-        print(f"Tip: Adjust high_confidence_early_stop (currently {self.ocr_params['high_confidence_early_stop']}%) to stop early when confident")
+        self.logger.info(f"Tip: If no numbers detected, try lowering white_threshold from 220 to 180-200")
+        self.logger.info(f"Tip: Adjust high_confidence_early_stop (currently {self.ocr_params['high_confidence_early_stop']}%) to stop early when confident")
 
 
 def main():
     """Main function to run OCR analysis on detected health regions"""
-    print("Starting OCR analysis on detected hero health regions...")
+    # Set up logging for main function
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('HeroHealthOCRMain')
+    
+    logger.info("Starting OCR analysis on detected hero health regions...")
     
     # Check if health region files exist
     missing_files = []
@@ -591,10 +604,10 @@ def main():
             missing_files.append(filename)
     
     if missing_files:
-        print("Error: Missing health region files:")
+        logger.error("Missing health region files:")
         for file in missing_files:
-            print(f"  - {file}")
-        print("Please run hearthstone_regions.py first to generate these files.")
+            logger.error(f"  - {file}")
+        logger.error("Please run hearthstone_regions.py first to generate these files.")
         return
     
     try:
@@ -604,8 +617,8 @@ def main():
         # Analyze both health regions
         results = ocr_reader.analyze_both_health_regions()
         
-        # Print final summary
-        ocr_reader.print_final_summary(results)
+        # Log final summary
+        ocr_reader.log_final_summary(results)
         
         # Extract final health values
         enemy_health = None
@@ -621,14 +634,15 @@ def main():
             if successful_ally:
                 ally_health = max(successful_ally, key=lambda x: int(x['method'].split('conf')[1]) if 'conf' in x['method'] else 0)['number']
         
-        print(f"\n🎯 FINAL RESULTS:")
+        # Print final results to console
+        print(f"🎯 FINAL RESULTS:")
         print(f"   Enemy Health: {enemy_health if enemy_health is not None else 'Not detected'}")
         print(f"   Ally Health: {ally_health if ally_health is not None else 'Not detected'}")
         
         return {'enemy_health': enemy_health, 'ally_health': ally_health}
         
     except Exception as e:
-        print(f"✗ Error: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         traceback.print_exc()
         return None

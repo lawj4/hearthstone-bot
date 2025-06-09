@@ -3,26 +3,46 @@ import numpy as np
 import pytesseract
 import os
 import re
+import logging
 import utils
 
 class ManaCrystalReader:
     """Class specifically for reading mana crystals in #/# format from preprocess_mana_crystals.png"""
     
     def __init__(self, save_debug_images=utils.DEBUG_IMAGES):
+        # Set up logging
+        self.logger = logging.getLogger('ManaCrystalReader')
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Create file handler if it doesn't exist
+        if not self.logger.handlers:
+            file_handler = logging.FileHandler('logs/hearthstone_debug.log')
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+        
         # Use only OCR configurations that work reliably for #/# pattern
         self.ocr_configs = [
             '--psm 7 -c tessedit_char_whitelist=0123456789/',   # Single text line - PRIMARY
             '--psm 6 -c tessedit_char_whitelist=0123456789/',   # Single uniform block - BACKUP
         ]
         self.save_debug_images = save_debug_images
+        
+        self.logger.info("ManaCrystalReader initialized")
     
     def load_mana_crystals_image(self):
         """Load the mana crystals region from saved screenshot"""
         filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
         if not os.path.exists(filename):
+            self.logger.error(f"Mana crystals file not found: {filename}")
             raise FileNotFoundError(f"Mana crystals file not found: {filename}")
         
         mana_crystals_image = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
+        self.logger.debug(f"Loaded mana crystals image: {filename}")
         return mana_crystals_image
     
     def preprocess_for_ocr(self, image):
@@ -54,6 +74,8 @@ class ManaCrystalReader:
         # Flood fill from top-center (w//2, 0)
         cv2.floodFill(binary, mask, (w//2, h//2-50), 0)
         binary = cv2.bitwise_not(binary)
+        
+        self.logger.debug(f"Preprocessed image for OCR: scaled by {scale_factor}x, flood filled, and inverted")
         return binary
     
     def read_mana_fraction(self, image):
@@ -70,6 +92,8 @@ class ManaCrystalReader:
                     # Clean up the text (remove whitespace, newlines)
                     clean_text = re.sub(r'\s+', '', text)
                     
+                    self.logger.debug(f"OCR attempt with config '{config}': raw='{text}', clean='{clean_text}'")
+                    
                     # STRICT: Look for exact #/# pattern
                     match = re.search(r'^(\d+)/(\d+)$', clean_text)  # Must be exactly #/#
                     if match:
@@ -78,26 +102,30 @@ class ManaCrystalReader:
                         
                         # Validate reasonable mana values (0-10 each)
                         if 0 <= current_mana <= 10 and 0 <= max_mana <= 10:
+                            self.logger.info(f"Successfully read mana: {current_mana}/{max_mana}")
                             return current_mana, max_mana, text
+                        else:
+                            self.logger.debug(f"Mana values out of range: {current_mana}/{max_mana}")
                 
                 except Exception as e:
+                    self.logger.debug(f"OCR config '{config}' failed: {e}")
                     continue  # Try next config
             
+            self.logger.warning("No valid mana pattern found in any OCR attempt")
             return None, None, ""
             
         except Exception as e:
-            if self.save_debug_images:
-                print(f"OCR Error: {e}")
+            self.logger.error(f"OCR processing failed: {e}")
             return None, None, ""
     
     def analyze_mana_crystals(self):
         """Analyze mana crystals from preprocess_mana_crystals.png"""
         filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
         if not os.path.exists(filename):
-            if self.save_debug_images:
-                print("Error: preprocess_mana_crystals.png not found!")
-                print("Please run hearthstone_regions.py first to generate the region files.")
+            self.logger.error(f"{filename} not found! Please run hearthstone_regions.py first to generate the region files.")
             return None, None
+        
+        self.logger.debug("Starting mana crystal analysis...")
         
         # Load the mana crystals image
         mana_image = self.load_mana_crystals_image()
@@ -112,13 +140,21 @@ class ManaCrystalReader:
             'success': current_mana is not None and max_mana is not None
         }
         
+        if result['success']:
+            self.logger.info(f"Mana analysis successful: {current_mana}/{max_mana}")
+        else:
+            self.logger.warning(f"Mana analysis failed - Raw text: '{raw_text}'")
+        
         return result, mana_image
     
     def save_analysis_results(self, result, mana_image, prefix='mana_crystals_analysis'):
         """Save the mana crystal analysis results as images"""
         if not self.save_debug_images:
+            self.logger.debug("Debug image saving disabled")
             return
             
+        self.logger.debug("Saving mana analysis debug images...")
+        
         # Create visualization
         result_image = mana_image.copy()
         if len(result_image.shape) == 2:  # grayscale
@@ -138,27 +174,31 @@ class ManaCrystalReader:
         
         # Save overview image
         cv2.imwrite(f'{prefix}_overview.png', result_image)
-        print(f"Saved: {prefix}_overview.png")
+        self.logger.debug(f"Saved: {prefix}_overview.png")
         
         # Save original and processed versions
         cv2.imwrite(f'{prefix}_original.png', mana_image)
         processed = self.preprocess_for_ocr(mana_image)
         cv2.imwrite(f'{prefix}_processed.png', processed)
         
-        print(f"Saved: {prefix}_original.png")
-        print(f"Saved: {prefix}_processed.png")
+        self.logger.debug(f"Saved: {prefix}_original.png")
+        self.logger.debug(f"Saved: {prefix}_processed.png")
 
 def main():
     """Main function to analyze mana crystals from preprocess_mana_crystals.png"""
+    # Set up logging for main function
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger('ManaCrystalMain')
+    
     reader = ManaCrystalReader()
     
-    print("Hearthstone Mana Crystal Reader (Optimized)")
+    logger.info("Hearthstone Mana Crystal Reader (Optimized)")
     filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
     
     # Check if test file exists
     if not os.path.exists(filename):
-        print(f"Missing file: {filename}")
-        print("Please run hearthstone_regions.py first to generate this file.")
+        logger.error(f"Missing file: {filename}")
+        logger.error("Please run hearthstone_regions.py first to generate this file.")
         return
     
     # Analyze mana crystals
@@ -167,7 +207,7 @@ def main():
     if result is None:
         return
         
-    # Print results
+    # Print results to console
     if result['success']:
         print(f"✓ Current Mana: {result['current_mana']}/{result['max_mana']}")
         print(f"✓ Available: {result['current_mana']}, Used: {result['max_mana'] - result['current_mana']}")
