@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+import utils
 
 class AllyBoardReader:
     """Class specifically for reading cards from test_ally_board.png using color mask detection"""
@@ -26,12 +27,12 @@ class AllyBoardReader:
     
     def load_ally_board_image(self):
         """Load test_ally_board.png file"""
-        if not os.path.exists('test_ally_board.png'):
-            raise FileNotFoundError("test_ally_board.png not found! Please run hearthstone_regions.py first.")
+        if not os.path.exists('images/preprocess_ally_board.png'):
+            raise FileNotFoundError("images/preprocess_ally_board.png not found! Please run hearthstone_regions.py first.")
         
-        ally_board_image = cv2.imread('test_ally_board.png', cv2.IMREAD_COLOR)
+        ally_board_image = cv2.imread('images/preprocess_ally_board.png', cv2.IMREAD_COLOR)
         if ally_board_image is None:
-            raise ValueError("Could not load test_ally_board.png")
+            raise ValueError("Could not load images/preprocess_ally_board.png")
         
         return ally_board_image
     
@@ -203,8 +204,8 @@ class AllyBoardReader:
         return crystal_boxes, valid_contours
     
     def analyze_color_mask(self):
-        """Analyze color mask from test_ally_board.png and save results"""
-        print("Loading test_ally_board.png...")
+        """Analyze color mask from images/preprocess_ally_board.png and save results"""
+        print("Loading images/preprocess_ally_board.png...")
         
         # Load ally board image
         ally_board_image = self.load_ally_board_image()
@@ -241,31 +242,34 @@ class AllyBoardReader:
             cv2.putText(visualization, str(i+1), (x, y-5), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-        # Save individual color masks
-        cv2.imwrite('ally_board_red_mask.png', red_mask)
-        cv2.imwrite('ally_board_green_mask.png', green_mask)
-        cv2.imwrite('ally_board_white_mask.png', white_mask)
-        cv2.imwrite('ally_board_combined_mask.png', combined_mask)
-        print("Saved: ally_board_red_mask.png")
-        print("Saved: ally_board_green_mask.png") 
-        print("Saved: ally_board_white_mask.png")
-        print("Saved: ally_board_combined_mask.png")
-        
-        # Save visualization with contours
-        cv2.imwrite('ally_board_crystal_contours.png', visualization)
-        print("Saved: ally_board_crystal_contours.png")
-        
-        # Create comprehensive comparison: original | red | green | white | combined | contours
-        comparison = np.zeros((ally_board_image.shape[0], ally_board_image.shape[1] * 6, 3), dtype=np.uint8)
-        comparison[:, :ally_board_image.shape[1]] = ally_board_image
-        comparison[:, ally_board_image.shape[1]:ally_board_image.shape[1]*2] = cv2.cvtColor(red_mask, cv2.COLOR_GRAY2BGR)
-        comparison[:, ally_board_image.shape[1]*2:ally_board_image.shape[1]*3] = cv2.cvtColor(green_mask, cv2.COLOR_GRAY2BGR)
-        comparison[:, ally_board_image.shape[1]*3:ally_board_image.shape[1]*4] = cv2.cvtColor(white_mask, cv2.COLOR_GRAY2BGR)
-        comparison[:, ally_board_image.shape[1]*4:ally_board_image.shape[1]*5] = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
-        comparison[:, ally_board_image.shape[1]*5:] = visualization
-        
-        cv2.imwrite('ally_board_color_analysis.png', comparison)
-        print("Saved: ally_board_color_analysis.png")
+        # Save individual color masks and visualization (only if DEBUG_IMAGES is True)
+        if utils.DEBUG_IMAGES:
+            cv2.imwrite('ally_board_red_mask.png', red_mask)
+            cv2.imwrite('ally_board_green_mask.png', green_mask)
+            cv2.imwrite('ally_board_white_mask.png', white_mask)
+            cv2.imwrite('ally_board_combined_mask.png', combined_mask)
+            print("Saved: ally_board_red_mask.png")
+            print("Saved: ally_board_green_mask.png") 
+            print("Saved: ally_board_white_mask.png")
+            print("Saved: ally_board_combined_mask.png")
+            
+            # Save visualization with contours
+            cv2.imwrite('ally_board_crystal_contours.png', visualization)
+            print("Saved: ally_board_crystal_contours.png")
+            
+            # Create comprehensive comparison: original | red | green | white | combined | contours
+            comparison = np.zeros((ally_board_image.shape[0], ally_board_image.shape[1] * 6, 3), dtype=np.uint8)
+            comparison[:, :ally_board_image.shape[1]] = ally_board_image
+            comparison[:, ally_board_image.shape[1]:ally_board_image.shape[1]*2] = cv2.cvtColor(red_mask, cv2.COLOR_GRAY2BGR)
+            comparison[:, ally_board_image.shape[1]*2:ally_board_image.shape[1]*3] = cv2.cvtColor(green_mask, cv2.COLOR_GRAY2BGR)
+            comparison[:, ally_board_image.shape[1]*3:ally_board_image.shape[1]*4] = cv2.cvtColor(white_mask, cv2.COLOR_GRAY2BGR)
+            comparison[:, ally_board_image.shape[1]*4:ally_board_image.shape[1]*5] = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
+            comparison[:, ally_board_image.shape[1]*5:] = visualization
+            
+            cv2.imwrite('ally_board_color_analysis.png', comparison)
+            print("Saved: ally_board_color_analysis.png")
+        else:
+            print("Debug images disabled (utils.DEBUG_IMAGES = False)")
         
         return combined_mask, crystal_boxes
     
@@ -284,8 +288,8 @@ def main():
     print()
     
     # Check if test_ally_board.png exists
-    if not os.path.exists('test_ally_board.png'):
-        print("Error: test_ally_board.png not found!")
+    if not os.path.exists('images/preprocess_ally_board.png'):
+        print("Error: images/preprocess_ally_board.png not found!")
         print("Please run hearthstone_regions.py first to generate this file.")
         return
     
@@ -297,25 +301,30 @@ def main():
         combined_mask, crystal_boxes = reader.analyze_color_mask()
         
         print(f"\n✓ Successfully detected {len(crystal_boxes)} crystals!")
-        print(f"✓ Check ally_board_color_analysis.png for full visualization")
+        if utils.DEBUG_IMAGES:
+            print(f"✓ Check ally_board_color_analysis.png for full visualization")
         
         # Summary
         if len(crystal_boxes) >= 1:
             print(f"🎯 Found {len(crystal_boxes)} colored regions on ally board")
         else:
             print(f"⚠️  No colored regions found - might need to adjust color tolerance")
-            print(f"   Consider increasing color_tolerance (currently {reader.color_tolerance})")
             
     except Exception as e:
         print(f"✗ Error: {e}")
     
-    print("\nGenerated files:")
-    print("  - ally_board_red_mask.png: Red color mask only")
-    print("  - ally_board_green_mask.png: Green color mask only") 
-    print("  - ally_board_white_mask.png: White color mask only")
-    print("  - ally_board_combined_mask.png: Combined red + green + white mask")
-    print("  - ally_board_crystal_contours.png: Contours + bounding boxes")
-    print("  - ally_board_color_analysis.png: Original | Red | Green | White | Combined | Contours")
+    if utils.DEBUG_IMAGES:
+        print("\nGenerated files:")
+        print("  - ally_board_red_mask.png: Red color mask only")
+        print("  - ally_board_green_mask.png: Green color mask only") 
+        print("  - ally_board_white_mask.png: White color mask only")
+        print("  - ally_board_combined_mask.png: Combined red + green + white mask")
+        print("  - ally_board_crystal_contours.png: Contours + bounding boxes")
+        print("  - ally_board_color_analysis.png: Original | Red | Green | White | Combined | Contours")
+    else:
+        print("\nNote: Debug images disabled (utils.DEBUG_IMAGES = False)")
+        print("      Set utils.DEBUG_IMAGES = True to generate debug PNG files")
+    
     print("\nTo adjust sensitivity:")
     print("  - Increase color_tolerance (currently 30) to detect more color variations")
     print("  - Decrease color_tolerance to be more strict with exact color matching")

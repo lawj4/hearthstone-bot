@@ -4,6 +4,7 @@ import pytesseract
 import os
 import re
 from hand_white_mask import HandReader
+import utils
 
 class HandOCRReader:
     """Class to apply OCR to all detected white objects from hand_white_mask.py."""
@@ -13,12 +14,12 @@ class HandOCRReader:
         # OCR PARAMETERS - Edit these values to tune performance
         self.ocr_params = {
             'white_threshold': 240,      # Threshold for white text (200-255)
-            'scale_factor': 8,           # Upscaling factor (6-12)
+            'scale_factor': 20,          # Upscaling factor (increased from 8 to 20)
             'gaussian_blur': (3, 3),     # Gaussian blur kernel size (1,1) to (7,7) - use odd numbers
             'gaussian_sigma': 1.0,       # Gaussian blur sigma (0.5-2.0)
             'morph_kernel_size': 2,      # Morphological operations kernel size (1-5)
             'padding': 15,               # Padding around crystals (10-25)
-            'rotation_angles': [-15, -10, -5, 0, 5, 10, 15],  # Rotation angles to try (degrees)
+            'rotation_angles': [0, -5, 5, -10, 10, -15, 15],  # Try 0° first, then small angles
             
             # NEW CONFIDENCE PARAMETERS
             'high_confidence_early_stop': 90,  # Stop trying other methods if confidence >= this value
@@ -30,7 +31,9 @@ class HandOCRReader:
         # Alternative configurations to try
         self.ocr_configs = [
             '--psm 8 -c tessedit_char_whitelist=0123456789',   # Single character
+            '--psm 10 -c tessedit_char_whitelist=0123456789',  # Single character, no layout analysis
             '--psm 7 -c tessedit_char_whitelist=0123456789',   # Single text line
+            '--psm 8 --oem 1 -c tessedit_char_whitelist=0123456789',  # LSTM only
             '--psm 6 -c tessedit_char_whitelist=0123456789',   # Single uniform block
             '--psm 13 -c tessedit_char_whitelist=0123456789',  # Raw line
         ]
@@ -68,7 +71,52 @@ class HandOCRReader:
         
         return padded_crystal
     
+    def add_padding_to_image(self, image, padding_pixels=30):
+        """Add white padding around the image to help OCR"""
+        height, width = image.shape
+        
+        # Create new image with padding
+        padded_height = height + (2 * padding_pixels)
+        padded_width = width + (2 * padding_pixels)
+        
+        # For white_mask_inv (black text on white), padding should be white (255)
+        padded_image = np.full((padded_height, padded_width), 255, dtype=np.uint8)
+        
+        # Place original image in center
+        padded_image[padding_pixels:padding_pixels + height, 
+                    padding_pixels:padding_pixels + width] = image
+        
+        return padded_image
+    
     def rotate_image(self, image, angle):
+        """Rotate image by given angle (degrees) with padding to avoid cropping"""
+        if angle == 0:
+            return image
+        
+        height, width = image.shape[:2]
+        
+        # Calculate the center of the image
+        center = (width // 2, height // 2)
+        
+        # Get rotation matrix
+        rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+        
+        # Calculate new dimensions to avoid cropping
+        cos = abs(rotation_matrix[0, 0])
+        sin = abs(rotation_matrix[0, 1])
+        new_width = int((height * sin) + (width * cos))
+        new_height = int((height * cos) + (width * sin))
+        
+        # Adjust rotation matrix for new dimensions
+        rotation_matrix[0, 2] += (new_width / 2) - center[0]
+        rotation_matrix[1, 2] += (new_height / 2) - center[1]
+        
+        # Perform rotation with padding
+        rotated = cv2.warpAffine(image, rotation_matrix, (new_width, new_height), 
+                                flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, 
+                                borderValue=0)
+        
+        return rotated
         """Rotate image by given angle (degrees) with padding to avoid cropping"""
         if angle == 0:
             return image
@@ -135,7 +183,10 @@ class HandOCRReader:
         # Also try inverted version (black text on white background for OCR)
         final_cleaned_inv = cv2.bitwise_not(final_cleaned)
         
-        return final_cleaned, final_cleaned_inv
+        # ADD SIGNIFICANT PADDING to help OCR recognition
+        padded_inv = self.add_padding_to_image(final_cleaned_inv, padding_pixels=30)
+        
+        return final_cleaned, padded_inv
     
     def ocr_crystal(self, crystal_image, crystal_id):
         """Apply OCR to a single crystal image - collect all results and pick best by confidence"""
@@ -162,13 +213,14 @@ class HandOCRReader:
             # Try each PSM mode on white_mask only (no double looping)
             white_mask, white_mask_inv = self.preprocess_for_ocr(rotated_crystal)
             
-            for config_name, config in zip(["PSM8", "PSM7", "PSM6", "PSM13"], self.ocr_configs):
+            # Try each PSM mode on white_mask_inv
+            for config_name, config in zip(["PSM8", "PSM10", "PSM7", "PSM8_LSTM", "PSM6", "PSM13"], self.ocr_configs):
                 if angle_skip_remaining:
                     break
                     
                 try:
-                    # Get OCR result with confidence (using white_mask only)
-                    data = pytesseract.image_to_data(white_mask, config=config, output_type=pytesseract.Output.DICT)
+                    # Get OCR result with confidence (using white_mask_inv - black text on white background)
+                    data = pytesseract.image_to_data(white_mask_inv, config=config, output_type=pytesseract.Output.DICT)
                     
                     # Extract text and confidence
                     confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
@@ -193,10 +245,10 @@ class HandOCRReader:
                                     'number': number,
                                     'confidence': confidence,
                                     'angle': angle,
-                                    'method': f"white_mask_{config_name}",
+                                    'method': f"white_mask_inv_{config_name}",
                                     'raw_text': text,
                                     'clean_text': clean_text,
-                                    'image': white_mask.copy(),
+                                    'image': white_mask_inv.copy(),
                                     'rotated_original': rotated_crystal.copy()
                                 }
                                 angle_results.append(result)
@@ -216,11 +268,11 @@ class HandOCRReader:
                                 print(f"      - {config_name} at {angle}°: '{text}' (not number, conf: {confidence}%)")
                     else:
                         print(f"      - {config_name} at {angle}°: No text found")
-                        # If no text found on first PSM attempt, skip remaining PSMs for this angle
-                        if config_name == "PSM8":
-                            print(f"      ⏭️  No text detected at {angle}°, skipping remaining PSMs")
-                            angle_skip_remaining = True
-                            break
+                        # Only skip remaining PSMs if we've tried multiple configs with no results
+                        if config_name in ["PSM8", "PSM10"] and angle == 0:
+                            # If both PSM8 and PSM10 fail at 0°, this might be a problematic image
+                            print(f"      ⚠️  Multiple PSMs failed at {angle}° - continuing with remaining PSMs")
+                        # Remove the automatic skip logic - let all PSMs try
                         
                     # LOW CONFIDENCE SKIP: Check if we should skip remaining PSMs after each attempt
                     if angle_max_confidence > 0 and angle_max_confidence < low_confidence_skip_threshold:
@@ -270,9 +322,10 @@ class HandOCRReader:
             else:
                 print(f"    ✓ Clear winner: '{best_result['number']}' (confidence: {best_result['confidence']}%)")
             
-            # Save the best result for debugging
-            cv2.imwrite(f'crystal_{crystal_id}_BEST_{best_result["angle"]}deg_{best_result["method"]}.png', best_result['image'])
-            cv2.imwrite(f'crystal_{crystal_id}_BEST_{best_result["angle"]}deg_original.png', best_result['rotated_original'])
+            # Save the best result for debugging (only if DEBUG_IMAGES is True)
+            if utils.DEBUG_IMAGES:
+                cv2.imwrite(f'crystal_{crystal_id}_BEST_{best_result["angle"]}deg_{best_result["method"]}.png', best_result['image'])
+                cv2.imwrite(f'crystal_{crystal_id}_BEST_{best_result["angle"]}deg_original.png', best_result['rotated_original'])
             
             return best_result['number'], best_result['clean_text'], f"{best_result['angle']}deg_{best_result['method']}_conf{best_result['confidence']}"
         
@@ -304,6 +357,16 @@ class HandOCRReader:
         print(f"\nApplying OCR to {len(crystal_boxes)} detected crystals...")
         print("-" * 55)
         
+        # Sort crystals from left to right based on x-coordinate
+        if crystal_boxes:
+            print(f"Sorting crystals from left to right...")
+            crystal_boxes.sort(key=lambda box: box[0])  # Sort by x-coordinate (leftmost first)
+            
+            # Print sorted order
+            for i, (x, y, w, h) in enumerate(crystal_boxes):
+                print(f"  Crystal {i+1}: x={x} (leftmost to rightmost)")
+            print()
+        
         ocr_results = []
         crystal_images = []
         
@@ -329,13 +392,14 @@ class HandOCRReader:
             }
             ocr_results.append(result)
             
-            # Save individual crystal image for debugging (with padding)
-            cv2.imwrite(f'crystal_{crystal_id}.png', crystal_region)
-            
-            # Save white mask versions for debugging
-            white_mask, white_mask_inv = self.preprocess_for_ocr(crystal_region)
-            cv2.imwrite(f'crystal_{crystal_id}_white_mask.png', white_mask)
-            cv2.imwrite(f'crystal_{crystal_id}_white_mask_inv.png', white_mask_inv)
+            # Save individual crystal image for debugging (only if DEBUG_IMAGES is True)
+            if utils.DEBUG_IMAGES:
+                cv2.imwrite(f'crystal_{crystal_id}.png', crystal_region)
+                
+                # Save white mask versions for debugging
+                white_mask, white_mask_inv = self.preprocess_for_ocr(crystal_region)
+                cv2.imwrite(f'crystal_{crystal_id}_white_mask.png', white_mask)
+                cv2.imwrite(f'crystal_{crystal_id}_white_mask_inv.png', white_mask_inv)
         
         # Create summary visualization
         self.create_ocr_visualization(hand_image, crystal_boxes, ocr_results)
@@ -375,13 +439,14 @@ class HandOCRReader:
             cv2.putText(visualization, f"#{result['id']}", (x, y+h+15), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
         
-        # Save visualization
-        cv2.imwrite('hand_ocr_results.png', visualization)
-        print(f"\nSaved: hand_ocr_results.png")
-        
-        # Save individual crystal images
-        for i in range(len(crystal_boxes)):
-            print(f"Saved: crystal_{i+1}.png")
+        # Save visualization (only if DEBUG_IMAGES is True)
+        if utils.DEBUG_IMAGES:
+            cv2.imwrite('hand_ocr_results.png', visualization)
+            print(f"\nSaved: hand_ocr_results.png")
+            
+            # Save individual crystal images
+            for i in range(len(crystal_boxes)):
+                print(f"Saved: crystal_{i+1}.png")
     
     def print_ocr_summary(self, ocr_results):
         """Print summary of OCR results"""
@@ -403,12 +468,17 @@ class HandOCRReader:
             for result in failed:
                 print(f"  Crystal {result['id']}: position {result['position'][:2]}")
         
-        print(f"\nFiles generated:")
-        print(f"  - hand_ocr_results.png: Visualization with OCR results")
-        print(f"  - crystal_1.png to crystal_{len(ocr_results)}.png: Individual crystal images (with padding)")
-        print(f"  - crystal_X_white_mask.png: White text isolation (white on black)")
-        print(f"  - crystal_X_white_mask_inv.png: White text isolation (black on white)")
-        print(f"  - crystal_X_BEST_method.png: Successful OCR version (if any)")
+        if utils.DEBUG_IMAGES:
+            print(f"\nFiles generated:")
+            print(f"  - hand_ocr_results.png: Visualization with OCR results")
+            print(f"  - crystal_1.png to crystal_{len(ocr_results)}.png: Individual crystal images (with padding)")
+            print(f"  - crystal_X_white_mask.png: White text isolation (white on black)")
+            print(f"  - crystal_X_white_mask_inv.png: White text isolation (black on white)")
+            print(f"  - crystal_X_BEST_method.png: Successful OCR version (if any)")
+        else:
+            print(f"\nNote: Debug images disabled (utils.DEBUG_IMAGES = False)")
+            print(f"      Set utils.DEBUG_IMAGES = True to generate debug PNG files")
+        
         print(f"\nTip: If no numbers detected, try lowering white_threshold from 240 to 220-235")
         print(f"Tip: Adjust high_confidence_early_stop (currently {self.ocr_params['high_confidence_early_stop']}%) to stop early when confident")
         print(f"Tip: Adjust low_confidence_skip_angle (currently {self.ocr_params['low_confidence_skip_angle']}%) to skip poor angles faster")

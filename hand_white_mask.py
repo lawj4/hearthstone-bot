@@ -6,7 +6,11 @@ class HandReader:
     """Class specifically for reading cards from test_hand.png using white mask detection"""
     
     def __init__(self):
-        pass
+        # Height restrictions for valid crystals
+        self.height_restrictions = {
+            'min_height': 20,         # Minimum height of crystal itself
+            'max_height': 40         # Maximum height of crystal itself
+        }
     
     def load_hand_image(self):
         """Load test_hand.png file"""
@@ -37,24 +41,66 @@ class HandReader:
         return white_mask
     
     def extract_individual_crystals(self, white_mask):
-        """Extract individual crystal contours from white mask"""
+        """Extract individual crystal contours from white mask with height restrictions"""
+        # Get image dimensions
+        image_height, image_width = white_mask.shape
+        
         # Find contours
         contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         crystal_boxes = []
         valid_contours = []
+        rejected_crystals = []
+        
+        print(f"  Image dimensions: {image_width}x{image_height}")
+        print(f"  Height restrictions:")
+        print(f"    Min crystal height: {self.height_restrictions['min_height']}px")
+        print(f"    Max crystal height: {self.height_restrictions['max_height']}px")
+        print()
         
         for i, contour in enumerate(contours):
             # Get bounding rectangle for each crystal
             x, y, w, h = cv2.boundingRect(contour)
             area = cv2.contourArea(contour)
             
-            # Filter out noise (adjust these values based on your crystal size)
-            if area > 50 and w > 5 and h > 5:
+            # Check all restrictions
+            valid = True
+            rejection_reasons = []
+            
+            # Basic size filters
+            if area <= 50:
+                valid = False
+                rejection_reasons.append(f"area too small ({area})")
+            if w <= 5:
+                valid = False
+                rejection_reasons.append(f"width too small ({w})")
+            if h <= 5:
+                valid = False
+                rejection_reasons.append(f"height too small ({h})")
+            
+            # Height restrictions
+            if h < self.height_restrictions['min_height']:
+                valid = False
+                rejection_reasons.append(f"crystal height too small ({h}px < {self.height_restrictions['min_height']}px)")
+            
+            if h > self.height_restrictions['max_height']:
+                valid = False
+                rejection_reasons.append(f"crystal height too large ({h}px > {self.height_restrictions['max_height']}px)")
+            
+            # Store result
+            if valid:
                 crystal_boxes.append((x, y, w, h))
                 valid_contours.append(contour)
-                print(f"  Crystal {len(crystal_boxes)}: position=({x},{y}), size=({w}x{h}), area={area}")
+                print(f"  ✓ Crystal {len(crystal_boxes)}: pos=({x},{y}), size=({w}x{h}), area={area}")
+            else:
+                rejected_crystals.append({
+                    'position': (x, y, w, h),
+                    'area': area,
+                    'reasons': rejection_reasons
+                })
+                print(f"  ✗ Rejected: pos=({x},{y}), size=({w}x{h}) - {', '.join(rejection_reasons)}")
         
+        print(f"\nSummary: {len(crystal_boxes)} valid crystals, {len(rejected_crystals)} rejected")
         return crystal_boxes, valid_contours
     
     def analyze_white_mask(self):
@@ -144,7 +190,7 @@ def main():
             print("   Consider increasing size filters or threshold value")
         else:
             print(f"⚠️  Only found {len(crystal_boxes)} crystals - might be missing some")
-            print("   Consider decreasing threshold value (currently 200)")
+            print("   Consider decreasing threshold value (currently 250)")
             
     except Exception as e:
         print(f"✗ Error: {e}")
@@ -154,8 +200,11 @@ def main():
     print("  - crystal_contours.png: Contours + bounding boxes")
     print("  - crystal_analysis.png: Original | Mask | Contours side-by-side")
     print("\nTo adjust sensitivity:")
-    print("  - Lower threshold (< 200) to detect more white areas")
-    print("  - Raise threshold (> 200) to detect only brightest areas")
+    print("  - Lower threshold (< 250) to detect more white areas")
+    print("  - Raise threshold (> 250) to detect only brightest areas")
+    print("\nTo adjust height restrictions:")
+    print(f"  - min_height: Minimum crystal height (currently {reader.height_restrictions['min_height']}px)")
+    print(f"  - max_height: Maximum crystal height (currently {reader.height_restrictions['max_height']}px)")
 
 if __name__ == "__main__":
     main()
