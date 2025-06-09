@@ -33,7 +33,7 @@ class HearthstoneRegions:
         """
         height, width = image.shape[:2]
         # Mana crystals are bottom-left corner
-        mana_region = image[int(height * 0.9):int(height * 0.95), int(width * 0.65):int(width * 0.7)]
+        mana_region = image[int(height * 0.92):int(height * 0.94), int(width * 0.65):int(width * 0.7)]
         
         # Convert to grayscale if requested and image is color
         if not color and len(image.shape) == 3:
@@ -42,27 +42,34 @@ class HearthstoneRegions:
         return mana_region
     
     def get_ally_board_region(self, image, color=True):
-        """Extract the game board area (center)"""
+        """Extract the ally board area (lower center)"""
         height, width = image.shape[:2]
-        # Board is roughly middle 40% vertically, center 60% horizontally
+        # Ally board is roughly lower middle section
         ally_board_region = image[int(height * 0.59):int(height * 0.63), 
                            int(width * 0.15):int(width * 0.85)]
         return ally_board_region
     
-    def get_enemy_hand_region(self, image, color=True):
-        """Extract enemy hand area (top of screen)"""
+    def get_enemy_board_region(self, image, color=True):
+        """Extract the enemy board area (upper center)"""
         height, width = image.shape[:2]
-        # Enemy hand is top 15% of screen
-        enemy_hand = image[:int(height * 0.15), :]
-        return enemy_hand
+        # Enemy board is roughly upper middle section, above ally board
+        enemy_board_region = image[int(height * 0.37):int(height * 0.41), 
+                            int(width * 0.15):int(width * 0.85)]
+        return enemy_board_region
     
-    def get_hero_portraits_region(self, image, color=True):
-        """Extract both hero portraits"""
+    def get_enemy_health_region(self, image, color=True):
+        """Extract enemy health area (top of screen)"""
         height, width = image.shape[:2]
-        # Heroes are on right side, vertically centered
-        heroes_region = image[int(height * 0.2):int(height * 0.8), 
-                            int(width * 0.85):]
-        return heroes_region
+        # Enemy health is top center of screen
+        enemy_health = image[int(height * 0.255):int(height * 0.295), int(width * 0.53):int(width * 0.555)]
+        return enemy_health
+    
+    def get_ally_health_region(self, image, color=True):
+        """Extract ally health area (bottom center)"""
+        height, width = image.shape[:2]
+        # Ally health is bottom center, similar positioning to enemy but lower
+        ally_health = image[int(height * 0.82):int(height * 0.86), int(width * 0.53):int(width * 0.555)]
+        return ally_health
     
     def find_card_regions_in_hand(self, hand_region):
         """Find individual card bounding boxes in hand region
@@ -123,8 +130,9 @@ class HearthstoneRegions:
             'hand': self.get_hand_region(image, color=hand_in_color),
             'mana_crystals': self.get_mana_crystals_region(image, color=False),  # Keep mana in grayscale for OCR
             'ally_board': self.get_ally_board_region(image, color=True),
-            'enemy_hand': self.get_enemy_hand_region(image, color=True),
-            'hero_portraits': self.get_hero_portraits_region(image, color=True)
+            'enemy_board': self.get_enemy_board_region(image, color=True),
+            'enemy_health': self.get_enemy_health_region(image, color=True),
+            'ally_health': self.get_ally_health_region(image, color=True)
         }
         
         # Save original

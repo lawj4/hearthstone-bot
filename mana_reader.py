@@ -8,9 +8,12 @@ import utils
 class ManaCrystalReader:
     """Class specifically for reading mana crystals in #/# format from preprocess_mana_crystals.png"""
     
-    def __init__(self, save_debug_images=False):
-        # OCR configuration for numbers and slash
-        self.ocr_config = '--psm 8 -c tessedit_char_whitelist=0123456789/'
+    def __init__(self, save_debug_images=utils.DEBUG_IMAGES):
+        # Use only OCR configurations that work reliably for #/# pattern
+        self.ocr_configs = [
+            '--psm 7 -c tessedit_char_whitelist=0123456789/',   # Single text line - PRIMARY
+            '--psm 6 -c tessedit_char_whitelist=0123456789/',   # Single uniform block - BACKUP
+        ]
         self.save_debug_images = save_debug_images
     
     def load_mana_crystals_image(self):
@@ -32,46 +35,55 @@ class ManaCrystalReader:
         # Apply threshold to get pure black text on white background
         _, binary = cv2.threshold(resized, 127, 255, cv2.THRESH_BINARY)
         
-        # Apply morphological operations to clean up text
-        kernel = np.ones((2,2), np.uint8)
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        # FLOOD FILL: Turn white noise areas to black
+        h, w = binary.shape
+        mask = np.zeros((h + 2, w + 2), np.uint8)  # Mask needs to be 2 pixels larger
         
-        # Crop to focus on the text area - adjust these values as needed
-        h, w = cleaned.shape
+        # Flood fill from top-right corner (w-1, 0)
+        cv2.floodFill(binary, mask, (w-1, 0), 0)
         
-        # Define crop boundaries (adjust these percentages)
-        crop_top = int(h * 0.4)      # Start 30% down from top
-        crop_bottom = int(h * 0.8)   # End 70% down from top  
-        crop_left = int(w * 0.15)     # Start 20% from left
-        crop_right = int(w * 0.85)    # End 80% from left
+        # Reset mask for next flood fill
+        mask = np.zeros((h + 2, w + 2), np.uint8)
         
-        # Apply the crop
-        cropped = cleaned[crop_top:crop_bottom, crop_left:crop_right]
+        # Flood fill from bottom-right corner (w-1, h-1)
+        cv2.floodFill(binary, mask, (w-1, h-1), 0)
         
-        return cropped
+        # Reset mask for next flood fill
+        mask = np.zeros((h + 2, w + 2), np.uint8)
+        
+        # Flood fill from top-center (w//2, 0)
+        cv2.floodFill(binary, mask, (w//2, h//2-50), 0)
+        binary = cv2.bitwise_not(binary)
+        return binary
     
     def read_mana_fraction(self, image):
-        """Read the #/# mana format from the entire image"""
+        """Read the #/# mana format using optimized OCR"""
         try:
             processed = self.preprocess_for_ocr(image)
             
-            # Try OCR on the processed image
-            text = pytesseract.image_to_string(processed, config=self.ocr_config).strip()
-            
-            # Clean up the text (remove whitespace, newlines)
-            text = re.sub(r'\s+', '', text)
-            
-            # Look for #/# pattern
-            match = re.search(r'(\d+)/(\d+)', text)
-            if match:
-                current_mana = int(match.group(1))
-                max_mana = int(match.group(2))
+            # Try each OCR configuration until we get a valid #/# result
+            for config in self.ocr_configs:
+                try:
+                    # Get OCR result
+                    text = pytesseract.image_to_string(processed, config=config).strip()
+                    
+                    # Clean up the text (remove whitespace, newlines)
+                    clean_text = re.sub(r'\s+', '', text)
+                    
+                    # STRICT: Look for exact #/# pattern
+                    match = re.search(r'^(\d+)/(\d+)$', clean_text)  # Must be exactly #/#
+                    if match:
+                        current_mana = int(match.group(1))
+                        max_mana = int(match.group(2))
+                        
+                        # Validate reasonable mana values (0-10 each)
+                        if 0 <= current_mana <= 10 and 0 <= max_mana <= 10:
+                            return current_mana, max_mana, text
                 
-                # Validate reasonable mana values (0-10 each)
-                if 0 <= current_mana <= 10 and 0 <= max_mana <= 10:
-                    return current_mana, max_mana, text
+                except Exception as e:
+                    continue  # Try next config
             
-            return None, None, text
+            return None, None, ""
             
         except Exception as e:
             if self.save_debug_images:
@@ -135,38 +147,12 @@ class ManaCrystalReader:
         
         print(f"Saved: {prefix}_original.png")
         print(f"Saved: {prefix}_processed.png")
-    
-    def try_alternative_preprocessing(self, image):
-        """Try different preprocessing approaches if initial OCR fails"""
-        methods = []
-        
-        # Method 1: Higher contrast
-        contrast = cv2.convertScaleAbs(image, alpha=2.0, beta=0)
-        methods.append(("high_contrast", contrast))
-        
-        # Method 2: Gaussian blur before threshold
-        blurred = cv2.GaussianBlur(image, (3, 3), 0)
-        _, thresh_blur = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY)
-        methods.append(("blur_threshold", thresh_blur))
-        
-        # Method 3: Adaptive threshold
-        adaptive = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                       cv2.THRESH_BINARY, 11, 2)
-        methods.append(("adaptive", adaptive))
-        
-        # Method 4: Erosion + Dilation
-        kernel = np.ones((2,2), np.uint8)
-        eroded = cv2.erode(image, kernel, iterations=1)
-        dilated = cv2.dilate(eroded, kernel, iterations=1)
-        methods.append(("erode_dilate", dilated))
-        
-        return methods
 
 def main():
     """Main function to analyze mana crystals from preprocess_mana_crystals.png"""
-    reader = ManaCrystalReader(save_debug_images=False)
+    reader = ManaCrystalReader()
     
-    print("Hearthstone Mana Crystal Reader")
+    print("Hearthstone Mana Crystal Reader (Optimized)")
     filename = os.path.join(utils.IMAGE_DIR, 'preprocess_mana_crystals.png')
     
     # Check if test file exists
@@ -180,46 +166,16 @@ def main():
     
     if result is None:
         return
-    
+        
     # Print results
     if result['success']:
-        print(f"Current Mana: {result['current_mana']}/{result['max_mana']}")
-        print(f"Available: {result['current_mana']}, Used: {result['max_mana'] - result['current_mana']}")
+        print(f"✓ Current Mana: {result['current_mana']}/{result['max_mana']}")
+        print(f"✓ Available: {result['current_mana']}, Used: {result['max_mana'] - result['current_mana']}")
     else:
-        print(f"Detection failed - Raw text: '{result['raw_text']}'")
-        
-        # Try alternative preprocessing methods
-        print("Trying alternative methods...")
-        alt_methods = reader.try_alternative_preprocessing(mana_image)
-        
-        for method_name, processed_img in alt_methods:
-            try:
-                # Scale up the alternative processed image
-                scale_factor = 4
-                h, w = processed_img.shape
-                scaled = cv2.resize(processed_img, (w * scale_factor, h * scale_factor))
-                
-                alt_text = pytesseract.image_to_string(scaled, config=reader.ocr_config).strip()
-                alt_text = re.sub(r'\s+', '', alt_text)
-                
-                match = re.search(r'(\d+)/(\d+)', alt_text)
-                if match:
-                    current = int(match.group(1))
-                    maximum = int(match.group(2))
-                    if 0 <= current <= 10 and 0 <= maximum <= 10:
-                        print(f"✓ {method_name}: {current}/{maximum}")
-                        # Save the successful method
-                        cv2.imwrite(f'mana_crystals_analysis_{method_name}.png', scaled)
-                        continue
-                
-                print(f"✗ {method_name}: '{alt_text}'")
-                
-            except Exception as e:
-                print(f"✗ {method_name}: Error - {e}")
+        print(f"✗ Detection failed - Raw text: '{result['raw_text']}'")
     
-    # Save analysis results (only if debug images enabled)
-    if reader.save_debug_images:
-        reader.save_analysis_results(result, mana_image, 'mana_crystals_analysis')
+    # Save analysis results
+    reader.save_analysis_results(result, mana_image, 'mana_crystals_analysis')
 
 if __name__ == "__main__":
     main()
